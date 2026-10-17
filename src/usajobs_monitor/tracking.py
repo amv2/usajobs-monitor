@@ -146,14 +146,35 @@ def save_decision(path: Path, number: str, status: str, note: str = "", title: s
     return previous
 
 
-def load_history(path: Path) -> dict[str, Any] | None:
+UNREADABLE_SUFFIX = ".unreadable"
+
+
+def read_history(path: Path) -> tuple[dict[str, Any] | None, str]:
+    """``(history, state)`` where state is "found", "missing" or "unreadable".
+
+    A missing file is a normal first run (or an evicted Actions cache). An unreadable
+    one is not, so runs say so instead of quietly starting over."""
+    if not path.exists():
+        return None, "missing"
     try:
         history = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return None
+        return None, "unreadable"
     if not isinstance(history, dict) or not isinstance(history.get("jobs"), dict):
-        return None
-    return history
+        return None, "unreadable"
+    return history, "found"
+
+
+def load_history(path: Path) -> dict[str, Any] | None:
+    return read_history(path)[0]
+
+
+def baseline_text(state: str, history_name: str = HISTORY_NAME) -> str:
+    """Why a run is a baseline, for reports and the digest."""
+    if state == "unreadable":
+        return (f"the earlier history file couldn't be read, so this run starts over and nothing is flagged NEW "
+                f"(the unreadable copy is kept as {history_name}{UNREADABLE_SUFFIX})")
+    return "there is no earlier history yet, so nothing is flagged NEW"
 
 
 @dataclass
@@ -167,6 +188,7 @@ class RunView:
     decisions: dict[str, dict[str, str]]
     baseline: bool
     history: dict[str, Any]
+    history_state: str = "missing"
 
     def flag_text(self, result: ReviewResult) -> str:
         return ", ".join(self.flags.get(job_id(result.job), []))
