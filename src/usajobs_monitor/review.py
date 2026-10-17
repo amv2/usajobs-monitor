@@ -266,6 +266,23 @@ def gs_grade_reason(job: dict[str, Any], min_grade: int | None) -> Reason | None
     return Reason(Code.SALARY, f"top grade {plans[0]}-{max(numbers)} is below {plans[0]}-{int(min_grade)}")
 
 
+def pay_reason(job: dict[str, Any], filters: dict[str, Any]) -> Reason | None:
+    """One salary-rule reason, or None. A posting with no pay listed is not "$0": with no
+    floor it passes, and with a floor it fails only as unconfirmed, so it can still be a
+    near miss or watch-list entry. The GS grade rule applies either way."""
+    upper = salary_upper(job)
+    salary_floor = float(filters.get("salary_upper_must_exceed") or 0)
+    if upper is not None and salary_floor > 0 and upper <= salary_floor:
+        return Reason(Code.SALARY, f"posted upper salary ${upper:,.0f} does not exceed ${salary_floor:,.0f}")
+    grade_reason = gs_grade_reason(job, filters.get("min_gs_grade"))
+    if grade_reason:
+        return grade_reason
+    if upper is None and salary_floor > 0:
+        return Reason(Code.SALARY, f"salary not posted, so it can't be confirmed above ${salary_floor:,.0f}; "
+                                   "check the announcement")
+    return None
+
+
 def review_job(job: dict[str, Any], config: dict[str, Any]) -> ReviewResult:
     filters = config["filters"]
     search = config["search"]
@@ -273,14 +290,9 @@ def review_job(job: dict[str, Any], config: dict[str, Any]) -> ReviewResult:
     text = collect_text(job)
     reasons: list[Reason] = []
 
-    upper = salary_upper(job)
-    salary_floor = float(filters.get("salary_upper_must_exceed") or 0)
-    if upper <= salary_floor:
-        reasons.append(Reason(Code.SALARY, f"posted upper salary ${upper:,.0f} does not exceed ${salary_floor:,.0f}"))
-    else:
-        grade_reason = gs_grade_reason(job, filters.get("min_gs_grade"))
-        if grade_reason:
-            reasons.append(grade_reason)
+    salary_reason = pay_reason(job, filters)
+    if salary_reason:
+        reasons.append(salary_reason)
 
     eligibility_basis, eligibility_reason = eligibility_screen(job, config)
     internal_other = not eligibility_basis and is_internal_other_agency(job, current_agency_terms(config))
@@ -336,7 +348,12 @@ def review_job(job: dict[str, Any], config: dict[str, Any]) -> ReviewResult:
     if target_agency_hit(job, search.get("target_agencies", [])):
         parts.append(("target agency", weights["target_agency"]))
     # Pay level ranks senior postings above junior ones among near misses and the watch list.
-    if upper > salary_floor:
+    # Unposted pay earns nothing here.
+    upper = salary_upper(job)
+    salary_floor = float(filters.get("salary_upper_must_exceed") or 0)
+    if upper is None:
+        pass
+    elif upper > salary_floor:
         parts.append(("upper pay above the salary rule", weights["above_salary_rule"]))
     elif upper >= weights["pay_tier_high"]:
         parts.append(("upper pay in the high tier", weights["pay_high"]))

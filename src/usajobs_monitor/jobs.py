@@ -73,25 +73,47 @@ def collect_text(job: dict[str, Any]) -> str:
     return re.sub(r"\s+", " ", as_text(relevant)).strip()
 
 
-def salary_upper(job: dict[str, Any]) -> float:
+# Hours, days and pay periods per year, to compare any posted rate with an annual floor.
+# 2,087 hours is OPM's standard for converting hourly to annual pay (5 U.S.C. 5504).
+ANNUAL_MULTIPLIERS = {"PH": 2087.0, "PD": 261.0, "PW": 52.0, "BW": 26.0, "PM": 12.0}
+
+
+def _amount(raw: Any) -> float | None:
+    try:
+        value = float(str(raw).replace(",", "").replace("$", "").strip())
+    except (TypeError, ValueError):
+        return None
+    return value if value > 0 else None
+
+
+def salary_upper(job: dict[str, Any]) -> float | None:
+    """The highest posted pay as an annual amount, or None when no pay is posted.
+
+    Hourly, daily, weekly, biweekly and monthly bands are annualized so they can be
+    compared with the annual salary floors. Missing pay is not $0: callers must decide
+    what an unknown salary means."""
     maximums: list[float] = []
     for band in job.get("PositionRemuneration", []) or []:
-        raw = band.get("MaximumRange")
-        try:
-            maximums.append(float(str(raw).replace(",", "")))
-        except (TypeError, ValueError):
+        if not isinstance(band, dict):
             continue
-    return max(maximums) if maximums else 0.0
+        amount = _amount(band.get("MaximumRange"))
+        if amount is None:
+            continue
+        rate = str(band.get("RateIntervalCode") or "").strip().upper()
+        maximums.append(amount * ANNUAL_MULTIPLIERS.get(rate, 1.0))
+    return max(maximums) if maximums else None
 
 
 def salary_display(job: dict[str, Any]) -> str:
     bands = []
     for band in job.get("PositionRemuneration", []) or []:
-        minimum = band.get("MinimumRange")
-        maximum = band.get("MaximumRange")
+        if not isinstance(band, dict):
+            continue
+        minimum = _amount(band.get("MinimumRange"))
+        maximum = _amount(band.get("MaximumRange"))
         rate = band.get("RateIntervalCode", "")
         if minimum or maximum:
-            bands.append(f"${float(minimum or 0):,.0f} - ${float(maximum or 0):,.0f} {rate}".strip())
+            bands.append(f"${minimum or 0:,.0f} - ${maximum or 0:,.0f} {rate}".strip())
     return "; ".join(bands)
 
 

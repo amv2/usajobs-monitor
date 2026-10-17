@@ -40,12 +40,14 @@ def near_miss_reason_text(result: ReviewResult) -> str:
 
 def clears_near_miss_floor(job: dict[str, Any], pay_floor: float, min_gs_grade: int | None) -> bool:
     """GS-scale postings must reach ``min_gs_grade`` when it is set (special rates can
-    push a lower grade past the pay floor); other pay systems are judged by upper pay alone."""
+    push a lower grade past the pay floor); other pay systems are judged by upper pay alone. Unposted pay passes: the posting
+    is already excluded for it, and a near miss is where a reader can check it."""
     if min_gs_grade and {plan.upper() for plan in job_pay_plans(job)} & GS_SCALE_PAY_PLANS:
         numbers = grade_numbers(job)
         if numbers and max(numbers) < int(min_gs_grade):
             return False
-    return pay_floor <= 0 or salary_upper(job) > pay_floor
+    upper = salary_upper(job)
+    return pay_floor <= 0 or upper is None or upper > pay_floor
 
 
 def watch_list_label(config: dict[str, Any]) -> str:
