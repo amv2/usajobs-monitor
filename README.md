@@ -2,7 +2,7 @@
 
 A scheduled job search for [USAJOBS](https://www.usajobs.gov) that does the filtering a keyword search can't. You describe the jobs you want and the hiring paths you qualify for in one config file, and each run gives you a short list of postings worth reading, a watch list, and the near misses, with a reason for every job it set aside.
 
-> **Status:** early. The core search, filtering, tracking and reports (phase 1) are ported from a personal tool that runs three times a week, and delivery by email, Discord, Slack and ntfy is in. Features marked *(planned)* aren't in the package yet. See [Roadmap](#roadmap).
+> **Status:** early. The core search, filtering, tracking and reports (phase 1) are ported from a personal tool that runs three times a week, delivery by email, Discord, Slack and ntfy is in, and it can run on GitHub Actions. Features marked *(planned)* aren't in the package yet. See [Roadmap](#roadmap).
 
 ## What it does
 
@@ -283,12 +283,45 @@ Register-ScheduledTask -TaskName "usajobs-monitor" -Action $action -Trigger $tri
 
 The task picks up the user environment variables you set in steps 3 and 6.
 
-### GitHub Actions *(planned, phase 3b)*
+### GitHub Actions
 
-A ready-made workflow so you can run the monitor without leaving a computer on: fork the repo, add `USAJOBS_EMAIL`, `USAJOBS_API_KEY` and your delivery variables as repository secrets, add your profile, and receive the digest by email or chat. Two things to know before you use it:
+No computer to leave on? GitHub can run the monitor on its own servers. The repository includes a workflow, [`.github/workflows/usajobs-monitor.yml`](.github/workflows/usajobs-monitor.yml), that searches and delivers on a schedule, and you can also start it by hand. A run takes a few minutes, well inside the free Actions minutes a private repository gets each month.
 
-- **Use a private repository.** Your profile describes your eligibility and possibly your current agency. Anything committed to a public fork is public.
-- Run history has to be carried between runs (as a cache or artifact) or every job will show as NEW. The workflow will handle this.
+**Use a private copy.** Your profile describes your eligibility and possibly your current agency, and your decisions file and reports describe your job search. Anything in a public repository is public. The workflow won't run in a public repository at all, so forking this repo (forks of a public repo stay public) isn't enough.
+
+1. **Make a private copy.** On GitHub, create a new **private** repository with no README, then push this code to it:
+
+   ```bash
+   git clone https://github.com/amv2/usajobs-monitor.git my-usajobs
+   cd my-usajobs
+   git remote set-url origin https://github.com/YOU/my-usajobs.git
+   git push -u origin main
+   ```
+
+   You can also use **Import repository** on GitHub, which copies a public repo into a new private one.
+
+2. **Add your profile** as `search/usajobs-monitor.toml`, starting from `examples/usajobs-monitor.example.toml`. Paths in it are relative to the `search` folder, so with the defaults the decisions file is `search/job_decisions.csv` and reports go to `search/reports` on the runner. If you list résumés, put them in a folder under `search/` and point `paths.resume_folder` at it. The `.gitignore` excludes these file names so they can't be committed by accident in a public clone, so add them on purpose:
+
+   ```bash
+   git add -f search/usajobs-monitor.toml search/job_decisions.csv
+   git commit -m "Add my search profile"
+   git push
+   ```
+
+   Uploading them with **Add file → Upload files** on GitHub works too. To keep the profile somewhere else in the repository, set a repository variable named `USAJOBS_CONFIG` to its path.
+
+3. **Add your secrets** under **Settings → Secrets and variables → Actions → New repository secret**. `USAJOBS_EMAIL` and `USAJOBS_API_KEY` are required; add the delivery secrets for the channels in your profile, with the same names as in [step 6](#6-get-results-delivered): `USAJOBS_SMTP_PASSWORD`, `USAJOBS_SMTP_USERNAME`, `USAJOBS_EMAIL_FROM`, `USAJOBS_EMAIL_TO`, `USAJOBS_DISCORD_WEBHOOK_URL`, `USAJOBS_SLACK_WEBHOOK_URL`, `USAJOBS_NTFY_TOPIC` and `USAJOBS_NTFY_TOKEN`. Secrets never appear in logs. The workflow passes only these names, so leave `password_env` and the other `*_env` settings at their defaults.
+
+4. **Try it.** Open the **Actions** tab, enable workflows if GitHub asks, pick **usajobs-monitor**, choose **Run workflow** and set mode to `preview`. That searches and writes the messages as files without sending anything. Download the run's `usajobs-reports-…` artifact to see the reports and the `delivery-preview` folder. Then run it again with mode `send`.
+
+After that it runs on its own. Good to know:
+
+- **Schedule.** The default is 12:00 UTC on Monday, Wednesday and Friday, which is 7 AM Eastern in winter and 8 AM in summer. GitHub schedules are always in UTC; change the `cron:` line in the workflow file to pick other days or times. Scheduled runs can start several minutes late, and GitHub runs schedules only from the default branch.
+- **Seen jobs are kept in the Actions cache.** Each run restores the previous run's job history, so NEW and dropped flags work as they do on your own computer, and saves the updated history for the next run. GitHub deletes a cache nobody has used for 7 days, so after a longer gap the next run treats every job as NEW. Nothing is committed back to your repository.
+- **Reports are kept as run artifacts** for 30 days. Set a repository variable `USAJOBS_REPORT_DAYS` to change that (GitHub's limit is 90 days for private repositories).
+- **Decisions.** Edit `search/job_decisions.csv` in the repository (GitHub's web editor is fine) and the next run picks it up.
+- **Failures.** A run that fails to search or deliver fails the workflow, and GitHub emails you about failed runs by default. Re-running a failed workflow searches again rather than resending the old run.
+- **Inactivity.** GitHub can disable scheduled workflows after 60 days with no repository activity; its documentation says this applies to public repositories. If it happens, re-enable the workflow from the **Actions** tab.
 
 ## Keeping secrets out of the repo
 
@@ -296,7 +329,7 @@ Your API key is tied to your email address. Your profile, decisions file and rep
 
 **What's safe to commit:** code, tests, docs, `examples/usajobs-monitor.example.toml` and the de-personalized files in `profiles/`.
 
-**What never is:** your own config, `.env` files, `job_decisions.csv`, `usajobs_job_history.json`, `reports/` (including the run folders and delivery previews) and logs.
+**What never is** (in a public repository): your own config, `.env` files, `job_decisions.csv`, `usajobs_job_history.json`, `reports/` (including the run folders and delivery previews) and logs.
 
 The repo's `.gitignore` already covers the defaults:
 
@@ -354,7 +387,7 @@ Good habits:
 | 1 | Package layout, structured reason codes, config validation, generic profiles, tests, cross-platform lock | Done |
 | 2 | Grade-based targeting with OPM locality pay tables | Planned |
 | 3 | SMTP email, Discord/Slack/ntfy delivery with a send ledger | Done |
-| 3b | GitHub Actions workflow, optional `keyring` secrets | Planned |
+| 3b | GitHub Actions workflow (done), optional `keyring` secrets (planned) | In progress |
 | 4 | `init` wizard, applicant-type presets, multiple profiles, `decide` command, HTML/CSV digests | Planned |
 | 5 | Optional AI add-on: résumé fit notes and an MCP server. The core never requires AI. | Planned |
 

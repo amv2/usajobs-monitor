@@ -1,0 +1,136 @@
+# Runs usajobs-monitor on GitHub's servers. Setup: README, "GitHub Actions".
+#
+# Use this only in a PRIVATE copy of the repository: your profile, decisions
+# file and reports describe your job search. The job refuses to run in a
+# public repository.
+name: usajobs-monitor
+
+on:
+  schedule:
+    # Times are UTC. 12:00 UTC is 7:00 AM Eastern in winter, 8:00 AM in summer.
+    # Edit this line to change the schedule: minute hour day month weekday.
+    - cron: "0 12 * * 1,3,5"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "send: search and deliver. preview: search, write the messages as files, send nothing. no-deliver: search only."
+        type: choice
+        options: [send, preview, no-deliver]
+        default: send
+
+permissions:
+  contents: read
+
+concurrency:
+  group: usajobs-monitor
+  cancel-in-progress: false
+
+jobs:
+  run:
+    if: github.event.repository.private
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      # Override with a repository variable named USAJOBS_CONFIG.
+      CONFIG: ${{ vars.USAJOBS_CONFIG || 'search/usajobs-monitor.toml' }}
+      STATE_DIR: .usajobs-state
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install usajobs-monitor
+        run: pip install .
+
+      - name: Find the config and reports folder
+        id: paths
+        run: |
+          if [ ! -f "$CONFIG" ]; then
+            echo "::error::No config at $CONFIG. Commit your profile there, or set the USAJOBS_CONFIG repository variable to its path."
+            exit 1
+          fi
+          reports=$(python - <<'PY'
+          import os
+          from pathlib import Path
+          from usajobs_monitor.config import load_settings
+          reports = load_settings(os.environ["CONFIG"], require_credentials=False).reports_dir
+          print(os.path.relpath(reports, Path.cwd()))
+          PY
+          )
+          echo "reports=$reports" >> "$GITHUB_OUTPUT"
+
+      # Job history (NEW / dropped flags) lives in the Actions cache between runs.
+      # Caches are immutable, so each run saves a new one and the next run
+      # restores the most recent.
+      - name: Restore job history
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.STATE_DIR }}
+          key: usajobs-history-${{ github.run_id }}
+          restore-keys: usajobs-history-
+
+      - name: Put history in the reports folder
+        env:
+          REPORTS: ${{ steps.paths.outputs.reports }}
+        run: |
+          mkdir -p "$REPORTS"
+          if [ -f "$STATE_DIR/usajobs_job_history.json" ]; then
+            cp "$STATE_DIR/usajobs_job_history.json" "$REPORTS/"
+            echo "Restored job history from an earlier run."
+          else
+            echo "No earlier job history; every job will show as NEW this time."
+          fi
+
+      - name: Search and deliver
+        env:
+          MODE: ${{ inputs.mode || 'send' }}
+          USAJOBS_EMAIL: ${{ secrets.USAJOBS_EMAIL }}
+          USAJOBS_API_KEY: ${{ secrets.USAJOBS_API_KEY }}
+          USAJOBS_SMTP_PASSWORD: ${{ secrets.USAJOBS_SMTP_PASSWORD }}
+          USAJOBS_SMTP_USERNAME: ${{ secrets.USAJOBS_SMTP_USERNAME }}
+          USAJOBS_EMAIL_FROM: ${{ secrets.USAJOBS_EMAIL_FROM }}
+          USAJOBS_EMAIL_TO: ${{ secrets.USAJOBS_EMAIL_TO }}
+          USAJOBS_DISCORD_WEBHOOK_URL: ${{ secrets.USAJOBS_DISCORD_WEBHOOK_URL }}
+          USAJOBS_SLACK_WEBHOOK_URL: ${{ secrets.USAJOBS_SLACK_WEBHOOK_URL }}
+          USAJOBS_NTFY_TOPIC: ${{ secrets.USAJOBS_NTFY_TOPIC }}
+          USAJOBS_NTFY_TOKEN: ${{ secrets.USAJOBS_NTFY_TOKEN }}
+        run: |
+          usajobs-monitor check-config --config "$CONFIG"
+          case "$MODE" in
+            send) usajobs-monitor run --config "$CONFIG" ;;
+            preview) usajobs-monitor run --preview-delivery --config "$CONFIG" ;;
+            no-deliver) usajobs-monitor run --no-deliver --config "$CONFIG" ;;
+            *) echo "::error::Unknown mode $MODE"; exit 2 ;;
+          esac
+
+      - name: Keep job history for the next run
+        if: always() && steps.paths.outputs.reports != ''
+        id: history
+        env:
+          REPORTS: ${{ steps.paths.outputs.reports }}
+        run: |
+          if [ -f "$REPORTS/usajobs_job_history.json" ]; then
+            mkdir -p "$STATE_DIR"
+            cp "$REPORTS/usajobs_job_history.json" "$STATE_DIR/"
+            echo "found=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Save job history
+        if: always() && steps.history.outputs.found == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.STATE_DIR }}
+          key: usajobs-history-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Upload reports
+        if: always() && steps.paths.outputs.reports != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: usajobs-reports-${{ github.run_number }}-${{ github.run_attempt }}
+          path: ${{ steps.paths.outputs.reports }}
+          include-hidden-files: false
+          if-no-files-found: ignore
+          retention-days: ${{ vars.USAJOBS_REPORT_DAYS || 30 }}
