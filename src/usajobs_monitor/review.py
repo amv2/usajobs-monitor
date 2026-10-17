@@ -22,6 +22,7 @@ from .jobs import (
     salary_upper,
     series_label,
 )
+from .presets import HIRING_PATHS
 from .reasons import Code, Reason
 
 # SES and its equivalents (USAJOBS pay plan code list). Agency-specific
@@ -102,6 +103,7 @@ def hiring_paths(job: dict[str, Any]) -> set[str]:
         "internal to an agency": "fed-internal-search",
         "agency employees only": "fed-internal-search",
         "career transition (ctap, ictap, rpl)": "fed-transition",
+        **{name.casefold(): code for code, name in HIRING_PATHS.items() if code not in ("fed-internal-search",)},
     }
     return {codes.get(label, "unrecognized:" + label) for label in labels}
 

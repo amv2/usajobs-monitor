@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import csv
+import html
+import io
 import re
 from datetime import datetime
 from pathlib import Path
@@ -20,14 +23,20 @@ from .jobs import (
     salary_display,
 )
 from .config import target_label
+from .presets import preset_labels
 from .reasons import code_of
 from .review import SENIOR_EXECUTIVE_PAY_PLANS, ReviewResult, applicant_label, target_agency_hit
 from .tracking import CLOSING_SOON_DAYS, RunView, near_miss_reason_text, watch_list_label
 
 WORD_NAME = "usajobs_briefing.docx"
 EXCEL_NAME = "usajobs_tracker.xlsx"
+HTML_NAME = "usajobs_digest.html"
+CSV_NAME = "usajobs_jobs.csv"
 SUMMARY_NAME = "usajobs_last_run.json"
-REPORT_NAMES = (WORD_NAME, EXCEL_NAME)
+REPORT_NAMES = (WORD_NAME, EXCEL_NAME)  # what runs wrote before report.formats existed
+FORMAT_FILES = {"docx": WORD_NAME, "xlsx": EXCEL_NAME, "html": HTML_NAME, "csv": CSV_NAME}
+REPORT_LABELS = {WORD_NAME: "Word briefing", EXCEL_NAME: "Excel tracker", HTML_NAME: "HTML digest",
+                 CSV_NAME: "CSV export"}
 QUALIFICATION_CHARS = 2000
 
 
@@ -94,6 +103,8 @@ def active_filters_text(config: dict[str, Any], decisions_name: str) -> list[str
     lines.append(f"Eligibility: a supported route for the {applicant_label(config)} is required ("
                  + "; ".join(routes) + "). Other special eligibilities are not assumed; "
                  "appointment-specific conditions still require verification.")
+    if preset_labels(config):
+        lines[-1] += " Applicant type: " + "; ".join(preset_labels(config)) + "."
 
     lines.append("Appointment type: temporary, term, NTE, detail, and other non-permanent appointment types "
                  "(USAJOBS appointment-type code, or the job title) are excluded.")
@@ -367,3 +378,144 @@ def summary_entry(result: ReviewResult, view: RunView, *, with_reasons: bool = F
         entry["exclusion_reasons"] = [str(r) for r in result.reasons]
         entry["exclusion_codes"] = [code.value if (code := code_of(r)) else "" for r in result.reasons]
     return entry
+
+
+def report_files(config: dict[str, Any]) -> list[str]:
+    """File names for ``report.formats``, in a fixed order."""
+    formats = (config.get("report") or {}).get("formats") or ["docx", "xlsx"]
+    return [name for fmt, name in FORMAT_FILES.items() if fmt in formats]
+
+
+def list_status(result: ReviewResult, view: RunView) -> str:
+    """Match, Watch, Near Miss, Excluded or Hidden: the list a posting landed on."""
+    for label, items in (("Hidden", view.hidden), ("Match", view.matches), ("Watch", view.watch),
+                         ("Near Miss", view.near)):
+        if any(r is result for r in items):
+            return label
+    return "Excluded"
+
+
+def _csv_cell(value: Any) -> Any:
+    # Spreadsheet apps run cells that start with these characters as formulas.
+    if isinstance(value, str) and value[:1] in ("=", "+", "-", "@", "\t", "\r"):
+        return "'" + value
+    return value
+
+
+def write_csv(path: Path, results: list[ReviewResult], view: RunView) -> None:
+    """Every reviewed posting, one row each, with the list it landed on."""
+    order = {"Match": 0, "Watch": 1, "Near Miss": 2, "Excluded": 3, "Hidden": 4}
+    rows = sorted(((list_status(r, view), r) for r in results),
+                  key=lambda pair: (order[pair[0]], -pair[1].score, str(pair[1].job.get("PositionTitle", ""))))
+    out = io.StringIO()
+    writer = csv.writer(out, lineterminator="\n")
+    writer.writerow(["List", *EXCEL_HEADERS[1:]])
+    for status, result in rows:
+        reasons = near_miss_reason_text(result) if status == "Near Miss" else "; ".join(map(str, result.reasons))
+        writer.writerow([_csv_cell(v) for v in excel_row(status, result, view, reasons)])
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(out.getvalue(), encoding="utf-8-sig")
+
+
+HTML_STYLE = {
+    "body": "margin:0;padding:24px 16px;background:#f4f5f7;font-family:-apple-system,'Segoe UI',Roboto,Helvetica,"
+            "Arial,sans-serif;color:#1f2328;font-size:15px;line-height:1.45",
+    "wrap": "max-width:760px;margin:0 auto",
+    "card": "background:#ffffff;border:1px solid #d8dee4;border-radius:8px;padding:14px 16px;margin:0 0 12px",
+    "h1": "font-size:22px;margin:0 0 4px",
+    "h2": "font-size:17px;margin:24px 0 8px;padding-bottom:4px;border-bottom:2px solid #1f4e78",
+    "muted": "color:#59636e;font-size:13px;margin:0",
+    "title": "font-size:16px;font-weight:600;margin:0 0 6px",
+    "flag": "display:inline-block;background:#fff1c2;color:#7a4a00;border-radius:4px;padding:0 6px;"
+            "font-size:12px;font-weight:600;margin-left:6px",
+    "fact": "margin:2px 0;font-size:14px",
+    "link": "color:#0b5cad",
+    "stat": "display:inline-block;margin:0 18px 6px 0",
+}
+
+
+def _safe_link(url: str) -> str:
+    return url if re.match(r"https://[A-Za-z0-9.-]+/", url or "") else ""
+
+
+def _html_job(result: ReviewResult, view: RunView, reason: str = "") -> str:
+    job = result.job
+    esc = html.escape
+    flags = "".join(f'<span style="{HTML_STYLE["flag"]}">{esc(flag)}</span>'
+                    for flag in view.flags.get(job_id(job), []))
+    facts = [
+        ("Agency", agency_display(job)),
+        ("Grade", f"{pay_plan_display(job)} {grade_display(job)}".strip()),
+        ("Promotion potential", promotion_potential_display(job)),
+        ("Series", occupational_series_display(job)),
+        ("Location", location_display(job) or "Not listed"),
+        ("Salary", salary_display(job) or "Not listed"),
+        ("Closes", str(job.get("ApplicationCloseDate", "") or "Not listed").partition("T")[0]),
+    ]
+    if view.your_status(result):
+        facts.append(("Your status", view.your_status(result)))
+    if reason:
+        facts.append(("Why excluded", reason))
+    if result.eligibility_basis:
+        facts.append(("Eligibility", result.eligibility_basis))
+    parts = [f'<div style="{HTML_STYLE["card"]}"><p style="{HTML_STYLE["title"]}">'
+             f'{esc(str(job.get("PositionTitle", "Untitled")))}{flags}</p>']
+    parts += [f'<p style="{HTML_STYLE["fact"]}"><b>{esc(k)}:</b> {esc(str(v))}</p>' for k, v in facts]
+    link = _safe_link(job_url(job))
+    number = esc(job_id(job))
+    parts.append(f'<p style="{HTML_STYLE["fact"]}">'
+                 + (f'<a style="{HTML_STYLE["link"]}" href="{esc(link, quote=True)}">View on USAJOBS</a> · '
+                    if link else "")
+                 + f'control number {number}</p></div>')
+    return "".join(parts)
+
+
+def write_html(path: Path, results: list[ReviewResult], config: dict[str, Any], calls: int, view: RunView,
+               decisions_name: str, now: datetime | None = None) -> None:
+    """A self-contained HTML digest of the whole run, readable in any browser or mail client."""
+    now = now or datetime.now()
+    esc = html.escape
+    title = config.get("report", {}).get("title") or "USAJOBS Job Monitor"
+    watch_label = watch_list_label(config)
+    stats = [("Matches", len(view.matches)), (watch_label, len(view.watch)), ("Near misses", len(view.near)),
+             ("Closing soon", view.closing_soon_count()), ("Jobs reviewed", len(results)), ("Searches", calls)]
+    body = [f'<div style="{HTML_STYLE["wrap"]}">',
+            f'<h1 style="{HTML_STYLE["h1"]}">{esc(title)}</h1>',
+            f'<p style="{HTML_STYLE["muted"]}">{esc(format_timestamp(now))}</p>',
+            f'<div style="{HTML_STYLE["card"]};margin-top:16px">'
+            + "".join(f'<span style="{HTML_STYLE["stat"]}"><b>{n}</b> {esc(label)}</span>' for label, n in stats)
+            + "</div>"]
+    if view.baseline:
+        body.append(f'<p style="{HTML_STYLE["muted"]}">Baseline run: there is no earlier history, '
+                    "so nothing is flagged NEW.</p>")
+    else:
+        body.append(f'<p style="{HTML_STYLE["muted"]}">New since last run: {view.new_count(view.matches)} matches, '
+                    f"{view.new_count(view.watch)} watch list, {view.new_count(view.near)} near misses. "
+                    f"Dropped: {len(view.dropped)}. Hidden as not interested: {len(view.hidden)}.</p>")
+
+    def section(heading: str, note: str, items: list[str], empty: str) -> None:
+        body.append(f'<h2 style="{HTML_STYLE["h2"]}">{esc(heading)}</h2>')
+        if note:
+            body.append(f'<p style="{HTML_STYLE["muted"]};margin-bottom:8px">{esc(note)}</p>')
+        body.extend(items or [f'<p style="{HTML_STYLE["muted"]}">{esc(empty)}</p>'])
+
+    section("Matches", "", [_html_job(r, view) for r in view.matches], "No jobs met the final filters in this run.")
+    if watch_label != "Watch list" or view.watch:
+        section(watch_label[:1].upper() + watch_label[1:], "Relevant postings that failed only the pay rule.",
+                [_html_job(r, view) for r in view.watch], "No postings qualified for the watch list.")
+    section("Near misses", "Excluded only for salary, eligibility route, or appointment type.",
+            [_html_job(r, view, near_miss_reason_text(r)) for r in view.near],
+            "No near-miss postings met the reporting threshold.")
+    if view.dropped:
+        section("Dropped since last run", "", [
+            f'<p style="{HTML_STYLE["fact"]}">{esc(e["title"])} ({esc(e["agency"])}): {esc(e["reason"])}</p>'
+            for e in view.dropped], "")
+    body.append(f'<h2 style="{HTML_STYLE["h2"]}">Active filters</h2>')
+    body.extend(f'<p style="{HTML_STYLE["fact"]}">{esc(line)}</p>' for line in active_filters_text(config, decisions_name))
+    body.append("</div>")
+    page = ('<!doctype html>\n<html lang="en"><head><meta charset="utf-8">'
+            '<meta name="viewport" content="width=device-width, initial-scale=1">'
+            f"<title>{esc(title)}</title></head>"
+            f'<body style="{HTML_STYLE["body"]}">' + "".join(body) + "</body></html>\n")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(page, encoding="utf-8")

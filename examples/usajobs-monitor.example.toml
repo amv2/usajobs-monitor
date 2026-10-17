@@ -1,5 +1,6 @@
 # usajobs-monitor sample profile
-# Copy to usajobs-monitor.toml, edit, then run:  usajobs-monitor check-config
+# Easiest start: `usajobs-monitor init` asks questions and writes a profile for you.
+# Or copy this to usajobs-monitor.toml, edit, then run:  usajobs-monitor check-config
 # Field-by-field notes: docs/CONFIG_REFERENCE.md
 #
 # Credentials are NOT stored here. Set them in your environment:
@@ -78,6 +79,10 @@ pay_plans = ["GS", "GG"]
 grades    = [13]
 
 [eligibility]
+# Applicant types fill in the keys below; anything you set yourself wins. Any of:
+# "public", "competitive-fed", "excepted-fed", "veteran", "military-spouse",
+# "student", "recent-graduate", "reinstatement", "disability"
+# presets = ["competitive-fed", "veteran"]
 service                 = "competitive"   # "competitive" | "excepted" | "none"
 has_competitive_status  = true
 interchange_agency      = ""              # excepted-service agency with an OPM interchange agreement
@@ -85,6 +90,7 @@ additional_hiring_paths = []              # e.g. ["vet", "mspouse", "fed-transit
 
 [report]
 title = "USAJOBS Job Monitor"
+formats = ["html", "csv"]   # also "docx" (Word briefing) and "xlsx" (Excel tracker); default ["docx", "xlsx"]
 
 # Optional: tune ranking. These are the defaults.
 # [scoring]

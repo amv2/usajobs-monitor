@@ -19,12 +19,15 @@ from email.utils import format_datetime
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
-from .reports import EXCEL_NAME, WORD_NAME
+from .reports import CSV_NAME, EXCEL_NAME, HTML_NAME, HTML_STYLE, REPORT_LABELS, WORD_NAME
 from .tracking import CLOSING_SOON_DAYS
 
+# File name -> (MIME type, the ZIP member an Office file must contain, or "").
 ATTACHMENT_TYPES = {
-    WORD_NAME: ("vnd.openxmlformats-officedocument.wordprocessingml.document", "word/document.xml"),
-    EXCEL_NAME: ("vnd.openxmlformats-officedocument.spreadsheetml.sheet", "xl/workbook.xml"),
+    WORD_NAME: ("application/vnd.openxmlformats-officedocument.wordprocessingml.document", "word/document.xml"),
+    EXCEL_NAME: ("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "xl/workbook.xml"),
+    HTML_NAME: ("text/html", ""),
+    CSV_NAME: ("text/csv", ""),
 }
 PREVIEW_FROM = "usajobs-monitor@example.invalid"
 PREVIEW_TO = "recipient@example.invalid"
@@ -201,24 +204,34 @@ def plain_text(digest: Digest, note: str = "") -> str:
 
 
 def html_text(digest: Digest, note: str = "") -> str:
-    parts = ["<!doctype html><html><body>", f"<h1>{html.escape(digest.subject)}</h1>"]
-    parts.extend(f"<p>{html.escape(p)}</p>" for p in [*digest.paragraphs, *([note] if note else [])])
+    """The email's HTML part: the same digest, styled inline so mail clients keep the look."""
+    style = HTML_STYLE
+    esc = html.escape
+    parts = ["<!doctype html><html><body style=\"" + style["body"] + "\">", f'<div style="{style["wrap"]}">',
+             f'<h1 style="{style["h1"]}">{esc(digest.subject)}</h1>']
+    parts.extend(f'<p style="{style["fact"]}">{esc(p)}</p>' for p in [*digest.paragraphs, *([note] if note else [])])
     for section in digest.sections:
-        parts.append(f"<h2>{html.escape(section.heading)}</h2>")
+        parts.append(f'<h2 style="{style["h2"]}">{esc(section.heading)}</h2>')
         for item in section.items:
-            parts.append(f"<h3>{html.escape(item.title)}</h3><ul>")
-            parts.extend(f"<li>{html.escape(d)}</li>" for d in item.details)
+            parts.append(f'<div style="{style["card"]}"><h3 style="{style["title"]}">{esc(item.title)}</h3><ul style="margin:0;padding-left:18px">')
+            parts.extend(f'<li style="{style["fact"]}">{esc(d)}</li>' for d in item.details)
             parts.append("</ul>")
             if item.url:
-                parts.append(f'<p><a href="{html.escape(item.url, quote=True)}">View announcement</a></p>')
-        parts.extend(f"<p>{html.escape(line)}</p>" for line in section.lines)
-    parts.append(f"<p>Run: {html.escape(digest.run_id)}</p></body></html>")
+                parts.append(f'<p style="{style["fact"]}"><a style="{style["link"]}" '
+                             f'href="{esc(item.url, quote=True)}">View announcement</a></p>')
+            parts.append("</div>")
+        parts.extend(f'<p style="{style["fact"]}">{esc(line)}</p>' for line in section.lines)
+    parts.append(f'<p style="{style["muted"]}">Run: {esc(digest.run_id)}</p></div></body></html>')
     return "".join(parts)
 
 
 def email_message(digest: Digest, attachments: list[tuple[str, bytes]], *, sender: str,
                   recipients: list[str]) -> tuple[EmailMessage, str]:
-    note = "The Word briefing and Excel tracker are attached." if attachments else ""
+    labels = [REPORT_LABELS[name] for name, _ in attachments]
+    note = ""
+    if labels:
+        listed = labels[0] if len(labels) == 1 else ", ".join(labels[:-1]) + " and " + labels[-1]
+        note = f"The {listed} {'is' if len(labels) == 1 else 'are'} attached."
     body = plain_text(digest, note)
     message = EmailMessage(policy=policy.SMTP)
     message["Subject"] = digest.subject
@@ -234,8 +247,11 @@ def email_message(digest: Digest, attachments: list[tuple[str, bytes]], *, sende
     day = digest.finished.date().isoformat()
     for name, data in attachments:
         stem, suffix = os.path.splitext(name)
-        message.add_attachment(data, maintype="application", subtype=ATTACHMENT_TYPES[name][0],
-                               filename=f"{stem}_{day}{suffix}")
+        maintype, subtype = ATTACHMENT_TYPES[name][0].split("/")
+        if maintype == "text":
+            message.add_attachment(data.decode("utf-8"), subtype=subtype, filename=f"{stem}_{day}{suffix}")
+        else:
+            message.add_attachment(data, maintype=maintype, subtype=subtype, filename=f"{stem}_{day}{suffix}")
     return message, body
 
 

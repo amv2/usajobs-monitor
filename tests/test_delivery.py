@@ -75,8 +75,8 @@ class DeliveryFixture(unittest.TestCase):
         }
         self.manifest = {"version": 1, "run_id": "test-run", "status": "ok",
                          "finished_at": self.summary["finished_at"], "attachments": []}
-        for name, (_, member) in ATTACHMENT_TYPES.items():
-            data = office_document(member)
+        for name in runner.REPORT_NAMES:
+            data = office_document(ATTACHMENT_TYPES[name][1])
             (self.run_dir / name).write_bytes(data)
             self.manifest["attachments"].append({"name": name, "sha256": hashlib.sha256(data).hexdigest()})
         self.write_summary()
@@ -141,7 +141,7 @@ class EmailTests(DeliveryFixture):
         message = self.preview_message()
         parts = list(message.iter_attachments())
         self.assertEqual({part.get_content_type() for part in parts},
-                         {f"application/{value[0]}" for value in ATTACHMENT_TYPES.values()})
+                         {ATTACHMENT_TYPES[name][0] for name in runner.REPORT_NAMES})
         self.assertTrue(all("2026-10-02" in part.get_filename() for part in parts))
         body = message.get_body(preferencelist=("plain",)).get_content()
         for expected in ("270 jobs", "105 searches", "GS-14", "Eligibility:", "Oct 15, 2026",

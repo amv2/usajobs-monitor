@@ -6,7 +6,8 @@ Template: [examples/usajobs-monitor.example.toml](../examples/usajobs-monitor.ex
 
 - **TOML** (`usajobs-monitor.toml`). Python 3.11+ reads it with the built-in `tomllib`, so there is no new dependency, and users get comments in their config.
 - **JSON** with the same keys is also accepted, so an existing `usajobs_config.json` keeps working (see "Old keys" below).
-- Pick a file with `--config PATH`. Default: `./usajobs-monitor.toml`.
+- Pick a file with `--config PATH`, or a saved profile with `--profile NAME` (a file in the profiles folder; see the README's "Several profiles"). Default: `./usajobs-monitor.toml`, or your only saved profile when that file doesn't exist.
+- `usajobs-monitor init` writes a new profile by asking questions.
 - `usajobs-monitor check-config` validates the file and reports errors by path (for example `filters.watch_list.grades[0]: expected an integer`). Unknown keys produce a warning.
 
 ## How a posting is sorted
@@ -33,8 +34,8 @@ With the optional extra (`pip install "usajobs-monitor[keyring]"`), any credenti
 
 | Key | Default | Meaning |
 |---|---|---|
-| `reports_dir` | `"reports"` | Where the briefing (`usajobs_briefing.docx`), tracker (`usajobs_tracker.xlsx`), `last_run.json` and run history go. |
-| `decisions_file` | `"job_decisions.csv"` | Your decisions by control number: `applied`, `watching`, or `not_interested` (the not-interested list; those postings are hidden on every run). Columns: `control_number,status,note`. |
+| `reports_dir` | `"reports"` | Where the reports (see `report.formats`), `usajobs_last_run.json` and run history go. |
+| `decisions_file` | `"job_decisions.csv"` | Your decisions by control number: `applied`, `watching`, or `not_interested` (the not-interested list; those postings are hidden on every run). Columns: `control_number,status,note`; other columns are ignored and kept. `usajobs-monitor decide` edits it for you and also fills `title` and `decided_on`. |
 | `resume_folder` | `""` | Optional. PDFs found here are listed in the briefing. |
 
 Relative paths resolve against the config file's folder, not the current directory.
@@ -124,18 +125,38 @@ Temporary appointments and eligibility gaps are failures but **not** hard no, so
 
 | Key | Default | Meaning |
 |---|---|---|
+| `presets` | `[]` | Applicant types, below. They fill in the other keys; any key you set yourself wins, and their hiring paths are added to yours. |
 | `service` | `"none"` | `competitive`, `excepted`, or `none` (not a federal employee). Excepted-service employees qualify for postings open to "fed-excepted". |
 | `has_competitive_status` | `false` | Qualifies you for "fed-competitive" (merit promotion) postings. |
 | `interchange_agency` | `""` | Set if your excepted-service agency has an OPM interchange agreement. Then postings that explicitly invite interchange applicants, or advertise special authorities, count as eligible unless the text denies interchange. |
-| `additional_hiring_paths` | `[]` | USAJOBS hiring-path codes you qualify for, for example `vet`, `mspouse`, `disability`, `fed-transition`, `graduates`, `peace`, `land`. |
+| `additional_hiring_paths` | `[]` | USAJOBS hiring-path codes you qualify for: `vet`, `mspouse`, `student`, `graduates`, `disability`, `fed-transition`, `nguard`, `native`, `overseas`, `peace`, `land` (the [USAJOBS code list](https://developer.usajobs.gov/General/Hiring-Paths)). Other values get a warning, since they never match. |
 
 Postings open to the public always pass.
+
+### Applicant-type presets
+
+A preset says which hiring paths an applicant type can use. It doesn't prove you're eligible: each route has conditions that the announcement and your own records decide, so read "Who may apply" before applying. `check-config` lists what your presets filled in.
+
+| Preset | Sets | Who it's for, and the conditions |
+|---|---|---|
+| `public` | nothing beyond the defaults | Anyone. Only announcements open to the public pass; federal-only (merit promotion) announcements don't. [USAJOBS](https://help.usajobs.gov/working-in-government/unique-hiring-paths/public) |
+| `competitive-fed` | `service = "competitive"`, `has_competitive_status = true` | Current competitive-service employees with status, which comes from a career or career-conditional appointment (SF-50 block 34). Add your agency under `[profile]` so its internal postings count. [5 CFR 212.301](https://www.ecfr.gov/current/title-5/section-212.301) |
+| `excepted-fed` | `service = "excepted"` | Current excepted-service employees. They generally can't apply to merit promotion postings unless their agency has an OPM interchange agreement; set `interchange_agency` if yours does, and the agreement's own conditions apply. [5 CFR 6.7](https://www.ecfr.gov/current/title-5/section-6.7), [USAJOBS](https://help.usajobs.gov/working-in-government/unique-hiring-paths/federal-employees) |
+| `veteran` | adds `vet` | VEOA covers preference eligibles and veterans separated after 3 or more years of continuous active service under honorable conditions. It applies to merit promotion announcements open outside the agency's workforce, not to excepted-service positions. VRA and the 30% or more disabled authority have their own rules. 5 U.S.C. 3304(f), [OPM](https://www.opm.gov/fedshirevets/hiring-officials/strategic-recruitment-and-hiring/military-spouses-family-members/tabs/veterans-employment-opportunities-act/) |
+| `military-spouse` | adds `mspouse` | Spouses of active-duty members, of members retired or separated with a 100% disability rating, and un-remarried widows or widowers of members killed on active duty. From January 1, 2029, active-duty spouses are limited to one appointment per permanent change of station. [5 CFR 315.612](https://www.ecfr.gov/current/title-5/section-315.612) |
+| `student` | adds `student` | Pathways Internship: enrolled or accepted, at least half time, in a qualifying degree, certificate or career and technical program, for the whole internship. [5 CFR 362.202, 362.203](https://www.ecfr.gov/current/title-5/part-362) |
+| `recent-graduate` | adds `graduates` | Pathways Recent Graduates: apply within 2 years of completing the qualifying program; veterans kept from applying by service get 2 years from discharge, up to 6 years after completion. [5 CFR 362.302](https://www.ecfr.gov/current/title-5/part-362) |
+| `reinstatement` | `has_competitive_status = true` | Former employees who held a career or career-conditional appointment. Career tenure or veterans' preference means no time limit; otherwise reinstatement is limited to 3 years after separation. [5 CFR 315.401](https://www.ecfr.gov/current/title-5/section-315.401) |
+| `disability` | adds `disability` | Schedule A for individuals with intellectual, severe physical or psychiatric disabilities, with proof of disability. [5 CFR 213.3102(u)](https://www.ecfr.gov/current/title-5/section-213.3102) |
+
+When presets disagree, `excepted` beats `competitive` for `service` (an excepted-service employee who is also a veteran keeps the excepted-service route), `has_competitive_status` is true if any preset sets it, and hiring paths are combined.
 
 ## `[report]` and `[scoring]`
 
 | Key | Default | Meaning |
 |---|---|---|
-| `report.title` | `"USAJOBS Job Monitor"` | Title on the briefing and tracker. The "Active filters" paragraph is generated from this config. |
+| `report.title` | `"USAJOBS Job Monitor"` | Title on every report. The "Active filters" paragraph is generated from this config. |
+| `report.formats` | `["docx", "xlsx"]` | Which reports to write: `html` (`usajobs_digest.html`, a self-contained page that opens in any browser), `csv` (`usajobs_jobs.csv`, every reviewed job with the list it landed on), `docx` (Word briefing), `xlsx` (Excel tracker). The default keeps older configs writing what they always did; `init` writes `["html", "csv"]`. |
 | `scoring.*` | see sample | Ranking weights and pay tiers. Optional; the defaults equal today's behavior. |
 
 ## `[delivery]`
@@ -161,7 +182,7 @@ Optional. Each `[delivery.<channel>]` table you add turns that channel on; with 
 | `password_env` | `"USAJOBS_SMTP_PASSWORD"` | The variable holding the SMTP password (use an app password). Read only when `username` is set. |
 | `from_address` | the username | Sender address. Env override: `USAJOBS_EMAIL_FROM`. |
 | `to_addresses` | required | Up to 10 recipients. Env override: `USAJOBS_EMAIL_TO`, comma-separated. |
-| `attach_reports` | `true` | Attach the Word briefing and Excel tracker. The whole message must stay under 20 MiB; set `false` to send the summary only. |
+| `attach_reports` | `true` | Attach the reports listed in `report.formats`. The whole message must stay under 20 MiB; set `false` to send the summary only. |
 
 ### `[delivery.discord]` and `[delivery.slack]`
 

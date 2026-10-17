@@ -45,6 +45,8 @@ DEFAULT_SCORING = {
     "pay_tier_mid": 155000,
 }
 DEFAULT_REPORT_TITLE = "USAJOBS Job Monitor"
+REPORT_FORMATS = ("docx", "xlsx", "html", "csv")
+DEFAULT_REPORT_FORMATS = ("docx", "xlsx")
 
 # Delivery secrets live only in environment variables (or the keychain under
 # the same names). Each channel names the variables it reads; the defaults below apply when a ``*_env`` key is left out.
@@ -275,16 +277,31 @@ def validate_config(raw: Mapping[str, Any]) -> tuple[dict[str, Any], list[str]]:
             check.warnings.append("filters.watch_list: needs both pay_plans and grades; the watch list stays empty")
 
     eligibility = check.section(config, "eligibility")
-    check.unknown(eligibility, "eligibility", {"service", "has_competitive_status", "interchange_agency",
+    check.unknown(eligibility, "eligibility", {"presets", "service", "has_competitive_status", "interchange_agency",
                                                "additional_hiring_paths"})
+    _check_presets(check, eligibility)
     check.string(eligibility, "service", "eligibility", "none", choices=SERVICE_VALUES)
     check.boolean(eligibility, "has_competitive_status", "eligibility", False)
     check.string(eligibility, "interchange_agency", "eligibility", "")
     check.strings(eligibility, "additional_hiring_paths", "eligibility", [])
+    from .presets import HIRING_PATHS
+    for index, path in enumerate(eligibility.get("additional_hiring_paths") or []):
+        if isinstance(path, str) and path.strip().casefold() not in HIRING_PATHS:
+            check.warnings.append(f"eligibility.additional_hiring_paths[{index}]: \"{path}\" is not a USAJOBS "
+                                  "hiring path code (" + ", ".join(HIRING_PATHS) + "), so it never matches")
 
     report = check.section(config, "report")
-    check.unknown(report, "report", {"title"})
+    check.unknown(report, "report", {"title", "formats"})
     check.string(report, "title", "report", DEFAULT_REPORT_TITLE)
+    check.strings(report, "formats", "report", list(DEFAULT_REPORT_FORMATS))
+    formats = report.get("formats")
+    if isinstance(formats, list) and all(isinstance(f, str) for f in formats):
+        report["formats"] = formats = list(dict.fromkeys(f.strip().lower() for f in formats))
+        if not formats:
+            check.error("report.formats", "must name at least one of " + ", ".join(REPORT_FORMATS))
+        for index, name in enumerate(formats):
+            if name not in REPORT_FORMATS:
+                check.error(f"report.formats[{index}]", "expected one of " + ", ".join(f'"{f}"' for f in REPORT_FORMATS))
 
     scoring = check.section(config, "scoring")
     check.unknown(scoring, "scoring", set(DEFAULT_SCORING))
@@ -296,6 +313,32 @@ def validate_config(raw: Mapping[str, Any]) -> tuple[dict[str, Any], list[str]]:
     if check.errors:
         raise ConfigError(check.errors)
     return config, check.warnings
+
+
+def _check_presets(check: _Checker, eligibility: dict[str, Any]) -> None:
+    """Fill ``[eligibility]`` from ``presets``. Keys set in the file win."""
+    from .presets import PRESETS, apply_presets
+
+    names = eligibility.get("presets")
+    if names is None:
+        eligibility.pop("presets", None)
+        return
+    if isinstance(names, str):
+        names = [names]
+    if not isinstance(names, list):
+        check.error("eligibility.presets", "expected a list of preset names")
+        eligibility.pop("presets")
+        return
+    clean = []
+    for index, name in enumerate(names):
+        key = str(name).strip().lower().replace("_", "-") if isinstance(name, str) else ""
+        if key not in PRESETS:
+            check.error(f"eligibility.presets[{index}]", "expected one of " + ", ".join(f'"{p}"' for p in PRESETS))
+        elif key not in clean:
+            clean.append(key)
+    eligibility["presets"] = clean
+    if len(clean) == len(names):
+        eligibility["resolved_presets"] = apply_presets(clean, eligibility)
 
 
 def _check_target(check: _Checker, config: dict[str, Any], filters: dict[str, Any]) -> None:
