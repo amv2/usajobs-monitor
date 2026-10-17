@@ -91,6 +91,59 @@ def load_decisions(path: Path) -> tuple[dict[str, dict[str, str]], list[str]]:
     return decisions, warnings
 
 
+DECISION_ALIASES = {"not_interested": "not_interested", "not": "not_interested", "no": "not_interested",
+                    "ni": "not_interested", "hide": "not_interested", "watch": "watching", "watching": "watching",
+                    "applied": "applied", "apply": "applied", "clear": "clear", "remove": "clear", "undo": "clear"}
+DECISION_COLUMNS = ["control_number", "status", "note", "title", "decided_on"]
+
+
+def normalize_status(value: str) -> str:
+    """'not interested', 'not-interested' and 'NI' all mean not_interested; 'clear' removes a decision."""
+    key = re.sub(r"[\s-]+", "_", value.strip().lower())
+    if key not in DECISION_ALIASES:
+        raise ValueError(f"unknown status \"{value}\"; use applied, watching, not_interested or clear")
+    return DECISION_ALIASES[key]
+
+
+def save_decision(path: Path, number: str, status: str, note: str = "", title: str = "",
+                  today: date | None = None) -> dict[str, str] | None:
+    """Add, replace or (with status "clear") remove one decision row, keeping the
+    file's other rows and columns as they are. Returns the row it replaced."""
+    number = number.strip()
+    if not number.isdigit():
+        raise ValueError("the control number is the number in the job's USAJOBS link, e.g. 812345600")
+    status = normalize_status(status)
+    rows: list[dict[str, str]] = []
+    columns = list(DECISION_COLUMNS)
+    if path.is_file():
+        with path.open(newline="", encoding="utf-8-sig") as f:
+            reader = csv.DictReader(f)
+            columns = list(reader.fieldnames or columns)
+            rows = [dict(row) for row in reader]
+        for required in ("control_number", "status", "note"):
+            if required not in columns:
+                columns.append(required)
+    previous = None
+    kept = []
+    for row in rows:
+        if str(row.get("control_number") or "").strip() == number:
+            previous = row
+        else:
+            kept.append(row)
+    if status != "clear":
+        row = {"control_number": number, "status": status, "note": note.strip(), "title": title,
+               "decided_on": (today or date.today()).isoformat()}
+        kept.append({key: value for key, value in row.items() if key in columns})
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f".{path.name}.tmp")
+    with tmp.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=columns, extrasaction="ignore", restval="")
+        writer.writeheader()
+        writer.writerows(kept)
+    tmp.replace(path)
+    return previous
+
+
 def load_history(path: Path) -> dict[str, Any] | None:
     try:
         history = json.loads(path.read_text(encoding="utf-8"))

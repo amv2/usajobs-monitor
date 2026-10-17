@@ -2,7 +2,7 @@
 
 A scheduled job search for [USAJOBS](https://www.usajobs.gov) that does the filtering a keyword search can't. You describe the jobs you want and the hiring paths you qualify for in one config file, and each run gives you a short list of postings worth reading, a watch list, and the near misses, with a reason for every job it set aside.
 
-> **Status:** early. The core search, filtering, tracking and reports (phase 1) are ported from a personal tool that runs three times a week, delivery by email, Discord, Slack and ntfy is in, and it can run on GitHub Actions. Features marked *(planned)* aren't in the package yet. See [Roadmap](#roadmap).
+> **Status:** early. The core search, filtering, tracking and reports (phase 1) are ported from a personal tool that runs three times a week, delivery by email, Discord, Slack and ntfy is in, it can run on GitHub Actions, and `usajobs-monitor init` sets up a profile for you. Features marked *(planned)* aren't in the package yet. See [Roadmap](#roadmap).
 
 ## What it does
 
@@ -19,9 +19,10 @@ A scheduled job search for [USAJOBS](https://www.usajobs.gov) that does the filt
   - **Near misses** fail exactly one check, shown as "Only failed check: …". Hard-no failures (wrong occupation, executive role, another agency's internal posting) never appear here.
 - **Remembers between runs.** Each job is flagged **NEW** the first time it appears and **CLOSING SOON** when three days or less remain, and jobs that disappeared are noted. You can record a decision (applied, not interested, watching) so a job stops nagging you.
 - **Runs safely on a schedule.** Each run works in its own folder and publishes reports only after they pass validation. A lock stops two runs from overlapping, and a failed run never overwrites the last good report or puts raw errors in anything that gets sent to you.
-- **Delivers results where you'll see them.** Email through any SMTP server with both reports attached, or a short digest to Discord, Slack or ntfy. A retry never sends the same run twice.
+- **Delivers results where you'll see them.** Email through any SMTP server with the reports attached, or a short digest to Discord, Slack or ntfy. A retry never sends the same run twice.
+- **Sets itself up.** `usajobs-monitor init` asks a few questions and writes your profile, with starting eligibility for your applicant type: current federal employee, excepted service, veteran, military spouse, student, recent graduate, former federal employee, Schedule A, or the general public.
 
-Output is a Word briefing (`usajobs_briefing.docx`), an Excel tracker (`usajobs_tracker.xlsx`) and a `usajobs_last_run.json` summary.
+Output is your choice of an HTML digest (`usajobs_digest.html`), a CSV of every job reviewed (`usajobs_jobs.csv`), a Word briefing (`usajobs_briefing.docx`) and an Excel tracker (`usajobs_tracker.xlsx`), plus a `usajobs_last_run.json` summary. Profiles written by `init` use HTML and CSV; older profiles keep Word and Excel until you set [`report.formats`](docs/CONFIG_REFERENCE.md#report-and-scoring).
 
 ## Requirements
 
@@ -101,7 +102,15 @@ How it fits together:
 
 ## 4. Create your profile
 
-Your profile is one config file. Start from one of the two files in the repo:
+Your profile is one config file. The quickest way to make one is the setup wizard:
+
+```bash
+usajobs-monitor init
+```
+
+It asks six things: your API key (and offers to save it in your keychain if the `keyring` extra is installed), who you're applying as, where you want to work, your target GS grade, the kind of work (keywords plus a job series picker that understands words like "budget" or "finance"), and how you want results. It saves the profile in your profiles folder (see [Several profiles](#several-profiles)) and tells you the next two commands to run. Use `init --config path/to/file.toml` to write the file somewhere else. The wizard never writes a credential into the profile.
+
+To start from a file instead, use one of the two in the repo:
 
 - `profiles/financial-management-dc.toml` is a ready-made profile for financial management roles in the Washington, DC area.
 - `examples/usajobs-monitor.example.toml` is the commented template with every section.
@@ -130,8 +139,8 @@ Every key, its default and what it does is listed in the [config reference](docs
 | `[search]` | What to ask USAJOBS for: locations and radius, keywords, how recent, a salary floor for the query, and the relevance signals (title terms, job series). |
 | `[target]` | Optional. The GS grade you're after and your OPM locality pay area. The tool turns them into the dollar pay floors for you. |
 | `[filters]` | Pay rules, the watch list, near-miss floors, and the exclusions. Dollar floors set here override `[target]`. |
-| `[eligibility]` | The hiring paths you qualify for: competitive or excepted service, competitive status, an interchange agreement, and extra USAJOBS hiring paths such as `vet` or `mspouse`. |
-| `[report]` | The title on your reports. |
+| `[eligibility]` | The hiring paths you qualify for: an applicant-type preset, or the details yourself (competitive or excepted service, competitive status, an interchange agreement, and extra USAJOBS hiring paths such as `vet` or `mspouse`). |
+| `[report]` | The title on your reports and which formats to write (HTML, CSV, Word, Excel). |
 | `[scoring]` | Optional ranking weights. Leave it out to use the defaults. |
 | `[delivery]` | Optional. Email, Discord, Slack or ntfy channels for the results (see step 6). |
 
@@ -205,7 +214,49 @@ usajobs-monitor pay-table Seattle     # one area's GS-1 to GS-15 rates
 
 The 2026 table comes from [Executive Order 14368](https://public-inspection.federalregister.gov/2025-23844.pdf) (Schedule 1 for base rates, Schedule 9 for locality percentages, Schedule 5 for the level IV pay cap) and matches OPM's [published 2026 tables](https://www.opm.gov/policy-data-oversight/pay-leave/salaries-wages/2026/general-schedule/). Rates are computed the way OPM does it: base × (1 + locality %), rounded to the dollar, capped at Executive Schedule level IV. Special rates, LEO rates and non-GS pay systems aren't modeled; those postings are judged by their posted pay.
 
-*(Planned, phase 4)* `usajobs-monitor init`, a setup wizard with presets by applicant type (current federal employee, excepted service, veteran, military spouse, public, Pathways, reinstatement).
+### Applicant types
+
+Who may apply is set per announcement through USAJOBS *hiring paths* ("This job is open to"). Instead of working out which paths apply to you, pick one or more presets:
+
+```toml
+[eligibility]
+presets = ["veteran", "military-spouse"]
+```
+
+| Preset | Keeps postings open to | Rule it reflects |
+|---|---|---|
+| `public` | The public | [USAJOBS: open to the public](https://help.usajobs.gov/working-in-government/unique-hiring-paths/public) |
+| `competitive-fed` | The public, and competitive-service employees (merit promotion) | Competitive status, [5 CFR 212.301](https://www.ecfr.gov/current/title-5/section-212.301) |
+| `excepted-fed` | The public and excepted-service employees; with `interchange_agency` set, also competitive-service postings that invite interchange candidates | OPM interchange agreements, [5 CFR 6.7](https://www.ecfr.gov/current/title-5/section-6.7) |
+| `veteran` | The public and veterans (`vet`) | VEOA, 5 U.S.C. 3304(f) ([OPM](https://www.opm.gov/fedshirevets/hiring-officials/strategic-recruitment-and-hiring/military-spouses-family-members/tabs/veterans-employment-opportunities-act/)); VRA and the 30% disabled authority |
+| `military-spouse` | The public and military spouses (`mspouse`) | [5 CFR 315.612](https://www.ecfr.gov/current/title-5/section-315.612) |
+| `student` | The public and students (`student`), the Pathways Internship Program | [5 CFR 362.202 and 362.203](https://www.ecfr.gov/current/title-5/part-362) |
+| `recent-graduate` | The public and recent graduates (`graduates`), the Pathways Recent Graduates Program | [5 CFR 362.302](https://www.ecfr.gov/current/title-5/part-362): within 2 years of completing your program, up to 6 for veterans kept from applying by service |
+| `reinstatement` | The public, and competitive-service postings, which accept reinstatement eligibles | [5 CFR 315.401](https://www.ecfr.gov/current/title-5/section-315.401): no time limit with career tenure or veterans' preference, otherwise 3 years after separation |
+| `disability` | The public and individuals with disabilities (`disability`), Schedule A | [5 CFR 213.3102(u)](https://www.ecfr.gov/current/title-5/section-213.3102) |
+
+Presets combine, and anything you set yourself under `[eligibility]` wins. `check-config` prints what the presets filled in. A preset only says which postings you *could* apply to; each route has its own conditions (service length, time limits, documents), so read the announcement's "Who may apply" before applying. The [config reference](docs/CONFIG_REFERENCE.md#applicant-type-presets) has the details for each one.
+
+### Several profiles
+
+One install can run several searches, for example one for you and one for a spouse. Each profile is a config file in your profiles folder with its own reports, history and decisions:
+
+| System | Profiles folder |
+|---|---|
+| macOS, Linux | `~/.config/usajobs-monitor/profiles` (or `$XDG_CONFIG_HOME/usajobs-monitor/profiles`) |
+| Windows | `%APPDATA%\usajobs-monitor\profiles` |
+
+Set `USAJOBS_MONITOR_HOME` to use another folder. Then:
+
+```bash
+usajobs-monitor init --profile alex           # writes profiles/alex.toml, reports go to profiles/alex/reports
+usajobs-monitor init --profile sam
+usajobs-monitor profiles                      # list them
+usajobs-monitor run --profile sam             # run one
+usajobs-monitor run --all                     # run every profile, one after another
+```
+
+Every command takes `--profile NAME` or `--config PATH`. With neither, it uses `./usajobs-monitor.toml`, or your only profile if you have just one. `run --all` refuses to start if two profiles share a reports folder.
 
 ## 5. Run it
 
@@ -219,15 +270,22 @@ usajobs-monitor run --config ~/usajobs/usajobs-monitor.toml
 
 Reports land in `paths.reports_dir`, next to your config file unless you give an absolute path. The run also keeps `usajobs_job_history.json` there; that's how it knows what's new next time.
 
-To record a decision, add a row to your decisions file (`paths.decisions_file`):
+To record a decision, use the control number (the number at the end of the job's USAJOBS link):
+
+```bash
+usajobs-monitor decide 812345600 applied "submitted 10/14"
+usajobs-monitor decide 812349900 not_interested     # hidden from every later run
+usajobs-monitor decide 812349900 clear              # undo
+usajobs-monitor decide                              # list your decisions
+```
+
+Status is one of `applied`, `watching` or `not_interested` (`not interested`, `not-interested` and `ni` work too). Decisions live in `paths.decisions_file`, a CSV you can also edit by hand:
 
 ```csv
 control_number,status,note
 812345600,applied,submitted 10/14
 812349900,not_interested,
 ```
-
-Status is one of `applied`, `not_interested` or `watching`. *(Planned, phase 4)* `usajobs-monitor decide <control#> <status> [note]`.
 
 ## 6. Get results delivered
 
@@ -246,7 +304,7 @@ to_addresses  = ["you@example.com"]
 server = "https://ntfy.sh"
 ```
 
-Email carries the summary plus both reports as attachments. Discord, Slack and ntfy get a short digest: counts, the top matches with their links, and anything new. Every key is in the [config reference](docs/CONFIG_REFERENCE.md#delivery).
+Email carries the summary with each report in `report.formats` attached (the HTML digest's content is also the email's own HTML body). Discord, Slack and ntfy get a short digest: counts, the top matches with their links, and anything new. Every key is in the [config reference](docs/CONFIG_REFERENCE.md#delivery).
 
 **Secrets go in environment variables or your keychain**, like your API key ([step 3](#or-keep-them-in-your-system-keychain)). A password or webhook URL in the config file is an error, so a config you share or commit can't leak one.
 
@@ -440,7 +498,7 @@ Good habits:
 | 2 | Grade-based targeting with OPM locality pay tables | Done |
 | 3 | SMTP email, Discord/Slack/ntfy delivery with a send ledger | Done |
 | 3b | GitHub Actions workflow, optional OS keychain secrets via `keyring` | Done |
-| 4 | `init` wizard, applicant-type presets, multiple profiles, `decide` command, HTML/CSV digests | Planned |
+| 4 | `init` wizard, applicant-type presets, multiple profiles, `decide` command, HTML/CSV outputs | Done |
 | 5 | Optional AI add-on: résumé fit notes and an MCP server. The core never requires AI. | Planned |
 
 ## Contributing

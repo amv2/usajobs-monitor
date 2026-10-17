@@ -6,7 +6,9 @@ never puts raw errors or tracebacks into anything meant for delivery.
 
 from __future__ import annotations
 
+import csv
 import hashlib
+import io
 import json
 import os
 import re
@@ -24,13 +26,19 @@ from . import api
 from .config import Settings
 from .locking import exclusive_lock
 from .reports import (
+    CSV_NAME,
     EXCEL_NAME,
+    FORMAT_FILES,
+    HTML_NAME,
     REPORT_NAMES,
     SUMMARY_NAME,
     WORD_NAME,
+    report_files,
     resume_pdfs,
     summary_entry,
+    write_csv,
     write_excel,
+    write_html,
     write_word,
 )
 from .review import review_job, target_agency_hit
@@ -99,9 +107,16 @@ def run_search(settings: Settings, output_dir: Path, *, today: date | None = Non
     history = load_history(settings.history_path)
     view = build_view(results, config, history, decisions, today or date.today(),
                       started_at.isoformat(timespec="seconds"))
+    files = report_files(config)
     word, excel = output_dir / WORD_NAME, output_dir / EXCEL_NAME
-    write_word(word, results, config, resumes, calls, view, settings.decisions_path.name)
-    write_excel(excel, results, config, resumes, calls, view, settings.decisions_path)
+    if WORD_NAME in files:
+        write_word(word, results, config, resumes, calls, view, settings.decisions_path.name)
+    if EXCEL_NAME in files:
+        write_excel(excel, results, config, resumes, calls, view, settings.decisions_path)
+    if HTML_NAME in files:
+        write_html(output_dir / HTML_NAME, results, config, calls, view, settings.decisions_path.name)
+    if CSV_NAME in files:
+        write_csv(output_dir / CSV_NAME, results, view)
     (output_dir / HISTORY).write_text(json.dumps(view.history, indent=2, sort_keys=True), encoding="utf-8")
 
     target_agencies = config["search"].get("target_agencies", [])
@@ -131,11 +146,52 @@ def run_search(settings: Settings, output_dir: Path, *, today: date | None = Non
         "watch_list": [summary_entry(r, view, with_reasons=True) for r in view.watch],
         "top_near_misses": [summary_entry(r, view, with_reasons=True) for r in view.near[:5]],
         "resume_count": len(resumes),
-        "word_briefing": str(word),
-        "excel_tracker": str(excel),
+        "report_files": files,
     }
+    _add_report_paths(summary, output_dir)
     (output_dir / SUMMARY).write_text(json.dumps(summary, indent=2, sort_keys=True), encoding="utf-8")
     return summary
+
+
+def _add_report_paths(summary: dict, folder: Path) -> None:
+    """Point ``word_briefing`` / ``excel_tracker`` (and their newer siblings) at ``folder``."""
+    for key, name in (("word_briefing", WORD_NAME), ("excel_tracker", EXCEL_NAME),
+                      ("html_digest", HTML_NAME), ("csv_export", CSV_NAME)):
+        if name in summary_report_files(summary):
+            summary[key] = str(folder / name)
+        else:
+            summary.pop(key, None)
+
+
+def summary_report_files(summary: dict) -> list[str]:
+    """The reports a run wrote. Summaries from before report.formats list none: they had the Office pair."""
+    files = summary.get("report_files", list(REPORT_NAMES))
+    if (not isinstance(files, list) or not files or len(set(files)) != len(files)
+            or any(name not in FORMAT_FILES.values() for name in files)):
+        raise ValueError("The run's report list is invalid.")
+    return files
+
+
+ZIP_MEMBERS = {WORD_NAME: "word/document.xml", EXCEL_NAME: "xl/workbook.xml"}
+
+
+def validate_report_file(path: Path) -> None:
+    """Raise ``ValueError`` unless ``path`` is a readable report of its kind."""
+    if path.name in ZIP_MEMBERS:
+        with zipfile.ZipFile(path) as archive:
+            if archive.testzip() is not None:
+                raise ValueError("Report ZIP integrity check failed.")
+            ET.fromstring(archive.read("[Content_Types].xml"))
+            ET.fromstring(archive.read(ZIP_MEMBERS[path.name]))
+    elif path.name == HTML_NAME:
+        if not path.read_text(encoding="utf-8").lstrip().lower().startswith("<!doctype html>"):
+            raise ValueError("The HTML digest is not an HTML document.")
+    elif path.name == CSV_NAME:
+        header = next(csv.reader(io.StringIO(path.read_text(encoding="utf-8-sig"))), [])
+        if header[:2] != ["List", "Score"]:
+            raise ValueError("The CSV export has an unexpected header.")
+    else:
+        raise ValueError("Unknown report file.")
 
 
 def validate_reports(run_dir: Path, started_at: datetime | None = None) -> dict:
@@ -162,17 +218,13 @@ def validate_reports(run_dir: Path, started_at: datetime | None = None) -> dict:
         raise ValueError("Invalid run timestamps.")
     if started_at is not None and start.timestamp() < started_at.timestamp() - 2:
         raise ValueError("Summary belongs to an earlier run.")
-    for name, member in zip(REPORT_NAMES, ("word/document.xml", "xl/workbook.xml")):
+    for name in summary_report_files(summary):
         p = run_dir / name
         if p.is_symlink() or not p.is_file() or not p.stat().st_size:
             raise ValueError("A report is missing or is not a regular file.")
         if started_at is not None and p.stat().st_mtime < started_at.timestamp() - 2:
             raise ValueError("A report belongs to an earlier run.")
-        with zipfile.ZipFile(p) as archive:
-            if archive.testzip() is not None:
-                raise ValueError("Report ZIP integrity check failed.")
-            ET.fromstring(archive.read("[Content_Types].xml"))
-            ET.fromstring(archive.read(member))
+        validate_report_file(p)
     summary["started_at"] = start.isoformat(timespec="seconds")
     summary["finished_at"] = finish.isoformat(timespec="seconds")
     return summary
@@ -180,14 +232,14 @@ def validate_reports(run_dir: Path, started_at: datetime | None = None) -> dict:
 
 def prepare_manifest(run_dir: Path, summary: dict, *, failure: bool = False, preview: bool = False) -> dict:
     summary["run_id"] = run_dir.name
+    files = [] if failure else summary_report_files(summary)
     if not failure:
-        summary["word_briefing"] = str(run_dir / REPORT_NAMES[0])
-        summary["excel_tracker"] = str(run_dir / REPORT_NAMES[1])
+        _add_report_paths(summary, run_dir)
     write_json(run_dir / SUMMARY, summary)
     manifest = {
         "version": 1, "run_id": run_dir.name, "status": summary["status"],
         "finished_at": summary["finished_at"], "summary_sha256": sha256(run_dir / SUMMARY),
-        "attachments": [] if failure else [{"name": n, "sha256": sha256(run_dir / n)} for n in REPORT_NAMES],
+        "attachments": [{"name": n, "sha256": sha256(run_dir / n)} for n in files],
         "failure_message": FAILURE_MESSAGE if failure else "", "preview_only": preview,
     }
     write_json(run_dir / "manifest.json", manifest)
@@ -196,15 +248,14 @@ def prepare_manifest(run_dir: Path, summary: dict, *, failure: bool = False, pre
 
 def publish_latest(run_dir: Path, reports: Path, summary: dict) -> None:
     # Publish JSON last, so its run_id marks a complete set of copied reports.
-    for name in REPORT_NAMES:
+    for name in summary_report_files(summary):
         atomic_write(reports / name, (run_dir / name).read_bytes())
     # Job history drives NEW/dropped flags; it advances only with a validated run.
     history = run_dir / HISTORY
     if history.is_file() and not history.is_symlink():
         atomic_write(reports / HISTORY, history.read_bytes())
     latest = dict(summary)
-    latest["word_briefing"] = str(reports / REPORT_NAMES[0])
-    latest["excel_tracker"] = str(reports / REPORT_NAMES[1])
+    _add_report_paths(latest, reports)
     write_json(reports / SUMMARY, latest)
 
 
@@ -233,8 +284,12 @@ def execute_search(settings: Settings) -> tuple[Path, bool]:
 
 def preview_current(reports: Path) -> Path:
     # Copies only allowlisted outputs and cannot be selected by select_run.
+    latest = reports / SUMMARY
+    if latest.is_symlink():
+        raise ValueError("Preview source must be a regular file.")
+    files = summary_report_files(json.loads(latest.read_text()))
     run_dir = new_run_dir(reports, preview=True)
-    for name in (*REPORT_NAMES, SUMMARY):
+    for name in (*files, SUMMARY):
         source = reports / name
         if source.is_symlink():
             raise ValueError("Preview source must be a regular file.")

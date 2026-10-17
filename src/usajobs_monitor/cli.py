@@ -1,4 +1,5 @@
-"""Command line: ``usajobs-monitor run | deliver | search | check-config | credentials | pay-table``."""
+"""Command line: ``usajobs-monitor init | run | deliver | search | decide | check-config | profiles |
+credentials | pay-table``."""
 
 from __future__ import annotations
 
@@ -45,6 +46,14 @@ def cmd_check_config(args: argparse.Namespace) -> int:
             print(f"    filters.{key} = {shown}")
         for key in resolved["overridden"]:
             print(f"    filters.{key}: set in your config, so the target value is not used")
+    eligibility = settings.config["eligibility"]
+    from .presets import preset_labels
+    if preset_labels(settings.config):
+        print(f"  Applicant type: {'; '.join(preset_labels(settings.config))}")
+        for key, value in eligibility.get("resolved_presets", {}).items():
+            print(f"    eligibility.{key} = {json.dumps(value)}")
+    from .reports import REPORT_LABELS, report_files
+    print("  Reports: " + ", ".join(REPORT_LABELS[name] for name in report_files(settings.config)))
     from .delivery import check_channels
     channels = check_channels(settings.config)
     if not channels:
@@ -71,8 +80,9 @@ def cmd_search(args: argparse.Namespace) -> int:
           f"Near misses: {summary['near_misses_reported']}")
     for warning in summary["search_warnings"]:
         print(f"warning: {warning}", file=sys.stderr)
-    print(f"Word briefing: {summary['word_briefing']}")
-    print(f"Excel tracker: {summary['excel_tracker']}")
+    from .reports import REPORT_LABELS
+    for name in summary["report_files"]:
+        print(f"{REPORT_LABELS[name]}: {output / name}")
     return 0
 
 
@@ -82,6 +92,8 @@ def _deliverer(settings, preview: bool):
 
 
 def cmd_run(args: argparse.Namespace) -> int:
+    if args.all:
+        return _run_all(args)
     from .runner import run
 
     settings = load_settings(args.config)
@@ -95,6 +107,135 @@ def cmd_run(args: argparse.Namespace) -> int:
         return 2
     print(json.dumps(outcome, indent=2))
     return code
+
+
+def _run_all(args: argparse.Namespace) -> int:
+    """Run every saved profile in turn; the exit code is the worst one."""
+    from . import profiles
+
+    saved = profiles.list_profiles()
+    if not saved:
+        print(f"No saved profiles in {profiles.profiles_dir()}. Create one with: usajobs-monitor init", file=sys.stderr)
+        return 2
+    folders: dict[Path, str] = {}
+    for name, path in saved:
+        reports = load_settings(path, require_credentials=False).reports_dir
+        if reports in folders:
+            print(f"Profiles {folders[reports]} and {name} share the reports folder {reports}; give each its own "
+                  "paths.reports_dir so their history and decisions stay separate.", file=sys.stderr)
+            return 2
+        folders[reports] = name
+    worst = 0
+    for name, path in saved:
+        print(f"== {name} ==")
+        try:
+            code = cmd_run(argparse.Namespace(**{**vars(args), "all": False, "config": path}))
+        except ConfigError as exc:
+            print(str(exc), file=sys.stderr)
+            code = 2
+        worst = max(worst, code)
+    return worst
+
+
+def cmd_profiles(args: argparse.Namespace) -> int:
+    from . import profiles
+
+    saved = profiles.list_profiles()
+    print(f"Profiles folder: {profiles.profiles_dir()}"
+          + ("" if os.environ.get(profiles.HOME_VAR) else f" (set {profiles.HOME_VAR} to move it)"))
+    if not saved:
+        print("  No profiles yet. Create one with: usajobs-monitor init")
+    for name, path in saved:
+        try:
+            settings = load_settings(path, require_credentials=False)
+            search = settings.config["search"]
+            detail = f"{len(search['locations'])} locations, {len(search['target_role_keywords'])} keywords"
+        except ConfigError as exc:
+            detail = f"{len(exc.errors)} config problems; run check-config --profile {name}"
+        print(f"  {name:<20} {detail}  ({path.name})")
+    return 0
+
+
+def cmd_decide(args: argparse.Namespace) -> int:
+    from .tracking import load_decisions, load_history, save_decision
+
+    settings = load_settings(args.config, require_credentials=False)
+    path = settings.decisions_path
+    if args.control_number is None:
+        decisions, warnings = load_decisions(path)
+        _print_warnings(warnings)
+        if not decisions:
+            print(f"No decisions yet in {path}.")
+        for number, decision in decisions.items():
+            note = f"  {decision['note']}" if decision["note"] else ""
+            print(f"{number:<12} {decision['status']:<15}{note}")
+        return 0
+    if args.status is None:
+        print("decide: give a status: applied, watching, not_interested or clear", file=sys.stderr)
+        return 2
+    number = args.control_number.strip()
+    seen = ((load_history(settings.history_path) or {}).get("jobs") or {}).get(number) or {}
+    title = str(seen.get("title") or "")
+    try:
+        previous = save_decision(path, number, args.status, " ".join(args.note), title)
+    except ValueError as exc:
+        print(f"decide: {exc}", file=sys.stderr)
+        return 2
+    from .tracking import normalize_status
+    status = normalize_status(args.status)
+    label = f"{number} ({title}, {seen.get('agency', '')})" if title else number
+    if status == "clear":
+        print(f"Cleared the decision for {label}." if previous else f"{label} had no decision; nothing changed.")
+    else:
+        print(f"Marked {label} as {status.replace('_', ' ')}"
+              + (f" (was {previous.get('status')})" if previous else "") + f". Saved in {path}.")
+        if status == "not_interested":
+            print("It is hidden from the next run's lists.")
+    if not title:
+        print("warning: this control number is not in the last run's history; check it against the USAJOBS link.",
+              file=sys.stderr)
+    return 0
+
+
+def cmd_init(args: argparse.Namespace) -> int:
+    from . import keychain, profiles
+    from .wizard import Cancelled, Wizard, render_profile, write_profile
+
+    print("usajobs-monitor setup. Press Enter to accept the [default]; Ctrl-C cancels without saving.")
+    try:
+        if args.config is not None:
+            path, reports_dir, decisions = Path(args.config), "reports", "job_decisions.csv"
+        else:
+            name = args.profile
+            while not name:
+                try:
+                    name = profiles.check_name(input("Profile name [default]: ").strip() or "default")
+                except ValueError as exc:
+                    print(f"  {exc}")
+            name = profiles.check_name(name)
+            path = profiles.profiles_dir() / f"{name}.toml"
+            reports_dir, decisions = f"{name}/reports", f"{name}/job_decisions.csv"
+        if path.exists() and not args.force:
+            print(f"{path} already exists. Pass --force to replace it, or pick another name.", file=sys.stderr)
+            return 2
+        import getpass
+        wizard = Wizard(secret=getpass.getpass, store=keychain.default_store())
+        answers = wizard.run()
+    except (Cancelled, KeyboardInterrupt, EOFError):
+        print("\nCancelled; nothing was saved.", file=sys.stderr)
+        return 130
+    except (ValueError, keychain.KeychainError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    write_profile(path, render_profile(answers, reports_dir=reports_dir, decisions_file=decisions), force=args.force)
+    print(f"\nSaved {path}")
+    settings = load_settings(path, require_credentials=False)
+    _print_warnings(settings.warnings)
+    flag = f"--config {path}" if args.config is not None else f"--profile {path.stem}"
+    print("Next:")
+    print(f"  usajobs-monitor check-config {flag}          # confirm credentials and see the pay floors")
+    print(f"  usajobs-monitor run --preview-delivery {flag}  # search now; alerts are written, not sent")
+    return 0
 
 
 def cmd_deliver(args: argparse.Namespace) -> int:
@@ -207,12 +348,27 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     sub = parser.add_subparsers(dest="command", required=True)
 
+    def config_options(p: argparse.ArgumentParser) -> None:
+        which = p.add_mutually_exclusive_group()
+        which.add_argument("--config", type=Path, default=None,
+                           help=f"config file, TOML or JSON (default: ./{DEFAULT_CONFIG_NAME}, "
+                                "or your only saved profile)")
+        which.add_argument("--profile", help="a saved profile's name (see usajobs-monitor profiles)")
+
     def add(name: str, help_text: str, func) -> argparse.ArgumentParser:
         p = sub.add_parser(name, help=help_text, description=help_text)
-        p.add_argument("--config", type=Path, default=Path(DEFAULT_CONFIG_NAME),
-                       help=f"config file, TOML or JSON (default: ./{DEFAULT_CONFIG_NAME})")
+        config_options(p)
         p.set_defaults(func=func)
         return p
+
+    init = sub.add_parser("init", help="Answer a few questions and write a search profile.",
+                          description="Answer a few questions and write a search profile. Without --config the "
+                                      "profile is saved in the profiles folder (see usajobs-monitor profiles).")
+    init_to = init.add_mutually_exclusive_group()
+    init_to.add_argument("--profile", help="name for the new profile (asked if left out)")
+    init_to.add_argument("--config", type=Path, default=None, help="write the profile to this file instead")
+    init.add_argument("--force", action="store_true", help="replace an existing profile")
+    init.set_defaults(func=cmd_init, resolve_config=False)
 
     run = add("run", "Search, validate the reports in an isolated run folder, publish them, then deliver them.",
               cmd_run)
@@ -220,6 +376,7 @@ def build_parser() -> argparse.ArgumentParser:
     mode.add_argument("--preview-delivery", action="store_true",
                       help="write the messages into the run folder instead of sending them")
     mode.add_argument("--no-deliver", action="store_true", help="skip delivery for this run")
+    run.add_argument("--all", action="store_true", help="run every saved profile, one after another")
     deliver = add("deliver", "Send (or preview) an earlier run again. Channels that already accepted it are skipped.",
                   cmd_deliver)
     deliver.add_argument("run_id", help='a run folder name from reports/runs, or "latest"')
@@ -227,6 +384,13 @@ def build_parser() -> argparse.ArgumentParser:
     search = add("search", "Search and write reports directly, without run isolation.", cmd_search)
     search.add_argument("--output-dir", type=Path, help="write reports here instead of paths.reports_dir")
     add("check-config", "Validate the config and report what a run would do. Never prints credentials.", cmd_check_config)
+    decide = add("decide", "Mark a job applied, watching or not interested (hidden from later runs), with an "
+                           "optional note. With no arguments, list your decisions.", cmd_decide)
+    decide.add_argument("control_number", nargs="?", help="the number in the job's USAJOBS link")
+    decide.add_argument("status", nargs="?", help="applied, watching, not_interested, or clear to remove it")
+    decide.add_argument("note", nargs="*", help="optional note, e.g. \"applied 10/17, referred\"")
+    profiles = sub.add_parser("profiles", help="List saved profiles.", description="List saved profiles.")
+    profiles.set_defaults(func=cmd_profiles)
     credentials = sub.add_parser(
         "credentials", help="Store or check credentials in the OS keychain. Never prints a secret.",
         description="Store or check credentials in the OS keychain (macOS Keychain, Windows Credential "
@@ -235,8 +399,7 @@ def build_parser() -> argparse.ArgumentParser:
     credentials.set_defaults(func=cmd_credentials)
     actions = credentials.add_subparsers(dest="action", required=True)
     status = actions.add_parser("status", help="show where each credential comes from, without values")
-    status.add_argument("--config", type=Path, default=Path(DEFAULT_CONFIG_NAME),
-                        help="also list the delivery secrets this config needs")
+    config_options(status)
     store = actions.add_parser("set", help="save a secret; prompts without echoing")
     store.add_argument("name", help="the variable name, for example USAJOBS_API_KEY")
     store.add_argument("--stdin", action="store_true", help="read the value from the first line of standard input")
@@ -253,6 +416,13 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
+        if hasattr(args, "profile") and getattr(args, "resolve_config", True):
+            from . import profiles
+            try:
+                args.config = profiles.resolve(args.config, args.profile, Path(DEFAULT_CONFIG_NAME))
+            except (FileNotFoundError, ValueError) as exc:
+                print(str(exc), file=sys.stderr)
+                return 2
         return args.func(args)
     except ConfigError as exc:
         print(str(exc), file=sys.stderr)

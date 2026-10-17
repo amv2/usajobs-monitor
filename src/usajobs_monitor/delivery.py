@@ -1,6 +1,6 @@
 """Send a validated run by email, Discord, Slack or ntfy.
 
-Delivery reads only the run's manifest, summary and the two hashed reports. A
+Delivery reads only the run's manifest, summary and the hashed reports. A
 failed run sends a fixed failure notice with no attachments. Secrets come only
 from environment variables or the OS keychain, and every message this module
 returns or records is fixed text that never includes a secret, a server
@@ -169,6 +169,19 @@ def _validate_zip(data: bytes, required_member: str) -> None:
         raise DeliveryError("An attachment is not a readable Office document.") from None
 
 
+def _validate_text(data: bytes, name: str) -> None:
+    try:
+        text = data.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        raise DeliveryError("A text report is not valid UTF-8.") from None
+    if "\x00" in text:
+        raise DeliveryError("A text report contains binary data.")
+    if name.endswith(".html") and not text.lstrip().lower().startswith("<!doctype html>"):
+        raise DeliveryError("The HTML digest is not an HTML document.")
+    if name.endswith(".csv") and not text.startswith("List,Score,"):
+        raise DeliveryError("The CSV export has an unexpected header.")
+
+
 @dataclass
 class Run:
     path: Path
@@ -209,8 +222,8 @@ def validated_run(run_dir: Path) -> Run:
             raise DeliveryError("A failed run must not attach reports.")
         return Run(run_dir, manifest, summary, finished, [])
     names = [item.get("name") for item in entries]
-    if len(names) != len(ATTACHMENT_TYPES) or set(names) != set(ATTACHMENT_TYPES):
-        raise DeliveryError("A successful run must contain exactly the Word briefing and Excel tracker.")
+    if not names or len(set(names)) != len(names) or not set(names) <= set(ATTACHMENT_TYPES):
+        raise DeliveryError("A successful run must list one or more known reports, each once.")
     matches = summary.get("matches")
     if not isinstance(matches, list) or any(not isinstance(match, dict) for match in matches):
         raise DeliveryError("The run summary has an invalid matches list.")
@@ -226,7 +239,10 @@ def validated_run(run_dir: Path) -> Run:
         name = entry["name"]
         data = _read_file(run_dir / name, MAX_EMAIL_BYTES)
         _verify_hash(data, entry.get("sha256"))
-        _validate_zip(data, ATTACHMENT_TYPES[name][1])
+        if ATTACHMENT_TYPES[name][1]:
+            _validate_zip(data, ATTACHMENT_TYPES[name][1])
+        else:
+            _validate_text(data, name)
         attachments.append((name, data))
     return Run(run_dir, manifest, summary, finished, attachments)
 
