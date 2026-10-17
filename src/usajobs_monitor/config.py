@@ -3,19 +3,21 @@
 TOML and JSON use the same keys. Validation is hand-rolled so errors name the
 exact setting (``filters.watch_list.grades[0]: expected an integer``) instead
 of failing with a ``KeyError`` deep in a review. Credentials come from the
-``USAJOBS_EMAIL`` / ``USAJOBS_API_KEY`` environment variables; a
-``credentials`` block in the file is still accepted, with a warning.
+``USAJOBS_EMAIL`` / ``USAJOBS_API_KEY`` environment variables, or from the OS
+keychain when the optional ``keyring`` extra is installed; a ``credentials``
+block in the file is still accepted, with a warning.
 """
 
 from __future__ import annotations
 
 import copy
 import json
-import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping
+
+from . import keychain
 
 DEFAULT_CONFIG_NAME = "usajobs-monitor.toml"
 PLACEHOLDER_VALUES = {"", "PUT_YOUR_USAJOBS_API_KEY_HERE", "PUT_YOUR_EMAIL_HERE"}
@@ -43,8 +45,8 @@ DEFAULT_SCORING = {
 }
 DEFAULT_REPORT_TITLE = "USAJOBS Job Monitor"
 
-# Delivery secrets live only in environment variables. Each channel names the
-# variables it reads; the defaults below apply when a ``*_env`` key is left out.
+# Delivery secrets live only in environment variables (or the keychain under
+# the same names). Each channel names the variables it reads; the defaults below apply when a ``*_env`` key is left out.
 DELIVERY_CHANNELS = ("email", "discord", "slack", "ntfy")
 DELIVERY_SECRET_ENV = {
     "email": {"password_env": "USAJOBS_SMTP_PASSWORD"},
@@ -311,7 +313,7 @@ def _check_delivery(check: _Checker, config: dict[str, Any]) -> None:
         secret_keys = {key.removesuffix("_env") for key in DELIVERY_SECRET_ENV[name]}
         for key in secret_keys & set(channel):
             env_key = f"{key}_env"
-            check.error(f"{path}.{key}", "secrets are read only from environment variables; remove it and set "
+            check.error(f"{path}.{key}", "secrets are read only from environment variables or the keychain; remove it and set "
                         + str(channel.get(env_key) or DELIVERY_SECRET_ENV[name][env_key]))
             del channel[key]
         known = {"enabled", *DELIVERY_SECRET_ENV[name]}
@@ -346,11 +348,12 @@ def _check_delivery(check: _Checker, config: dict[str, Any]) -> None:
 
 
 def resolve_credentials(config: dict[str, Any], env: Mapping[str, str] | None = None) -> list[str]:
-    """Put credentials into ``config["credentials"]``, preferring the environment.
+    """Put credentials into ``config["credentials"]``, preferring the environment,
+    then the keychain, then the file.
 
     Returns warnings. Never includes a credential value in any message.
     """
-    env = os.environ if env is None else env
+    env = keychain.environment() if env is None else env
     warnings: list[str] = []
     file_creds = config.get("credentials")
     if file_creds is not None and not isinstance(file_creds, dict):
@@ -367,7 +370,8 @@ def resolve_credentials(config: dict[str, Any], env: Mapping[str, str] | None = 
         if value in PLACEHOLDER_VALUES:
             value = str(file_creds.get(key) or "").strip()
         if value in PLACEHOLDER_VALUES:
-            errors.append(f"credentials.{key}: missing; set the {var} environment variable")
+            errors.append(f"credentials.{key}: missing; set the {var} environment variable"
+                          + keychain.missing_hint(env, var))
         resolved[key] = value
     if errors:
         raise ConfigError(errors)

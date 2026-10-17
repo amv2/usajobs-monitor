@@ -77,7 +77,27 @@ Windows (PowerShell, saved for your user account):
 
 Open a new terminal afterwards so the variables are picked up.
 
-*(Planned, phase 3b)* Storing credentials in your operating system's keychain through the `keyring` library, with environment variables as the fallback.
+### Or keep them in your system keychain
+
+Instead of environment variables, you can store credentials in your operating system's encrypted vault: Keychain on macOS, Credential Manager on Windows, or Secret Service (GNOME Keyring, KWallet) on Linux. Install the optional extra, then save each value. You're prompted for it and nothing is shown as you type:
+
+```bash
+pip install -e ".[keyring]"
+usajobs-monitor credentials set USAJOBS_EMAIL
+usajobs-monitor credentials set USAJOBS_API_KEY
+usajobs-monitor credentials status          # where each one comes from; never prints values
+```
+
+The same command stores delivery secrets from [step 6](#6-get-results-delivered), for example `usajobs-monitor credentials set USAJOBS_SMTP_PASSWORD`, and `credentials status --config your-profile.toml` lists the ones your profile needs. `credentials delete NAME` removes one.
+
+How it fits together:
+
+- **An environment variable always wins.** The keychain is only read for a variable that isn't set, so existing setups keep working unchanged.
+- Entries are saved under the service name `usajobs-monitor`, with the variable name as the account, so you can also see or remove them in Keychain Access or Credential Manager.
+- To pipe a value in from a password manager or script, use `--stdin`, which reads the first line: `your-password-cli get usajobs-key | usajobs-monitor credentials set USAJOBS_API_KEY --stdin`.
+- [GitHub Actions](#github-actions) doesn't use the keychain; it keeps reading repository secrets.
+- Set `USAJOBS_KEYRING=0` to stop the tool from reading the keychain. Without the extra installed, or on a computer with no keychain service (a headless server, for example), the tool simply uses environment variables.
+- On macOS, if you recreate the virtual environment or upgrade Python, macOS may ask once whether Python can use the saved item. Choose **Always Allow**.
 
 ## 4. Create your profile
 
@@ -196,7 +216,7 @@ server = "https://ntfy.sh"
 
 Email carries the summary plus both reports as attachments. Discord, Slack and ntfy get a short digest: counts, the top matches with their links, and anything new. Every key is in the [config reference](docs/CONFIG_REFERENCE.md#delivery).
 
-**Secrets go in environment variables only**, like your API key. A password or webhook URL in the config file is an error, so a config you share or commit can't leak one.
+**Secrets go in environment variables or your keychain**, like your API key ([step 3](#or-keep-them-in-your-system-keychain)). A password or webhook URL in the config file is an error, so a config you share or commit can't leak one.
 
 | Variable | Used by |
 |---|---|
@@ -241,7 +261,7 @@ Run `crontab -e` and add:
 0 7 * * 1,3,5  . $HOME/.usajobs_env && /home/you/usajobs-monitor/.venv/bin/usajobs-monitor run --config /home/you/usajobs/usajobs-monitor.toml >> /home/you/usajobs/cron.log 2>&1
 ```
 
-cron doesn't read your shell profile, so put the `export` lines from steps 3 and 6 in `~/.usajobs_env` and protect that file with `chmod 600 ~/.usajobs_env`.
+cron doesn't read your shell profile, so put the `export` lines from steps 3 and 6 in `~/.usajobs_env` and protect that file with `chmod 600 ~/.usajobs_env`. If you stored everything in the macOS keychain instead, drop the `. $HOME/.usajobs_env &&` part. The keychain is readable while you're logged in. On Linux, cron jobs usually can't reach Secret Service, so keep using the env file there.
 
 ### macOS: launchd
 
@@ -270,7 +290,7 @@ cron works on macOS, but launchd also catches up on a run missed while the lapto
 </plist>
 ```
 
-Load it with `launchctl load ~/Library/LaunchAgents/com.usajobs-monitor.plist`.
+Load it with `launchctl load ~/Library/LaunchAgents/com.usajobs-monitor.plist`. With credentials in the keychain you can drop `. "$HOME/.usajobs_env" &amp;&amp;` from the command.
 
 ### Windows: Task Scheduler
 
@@ -281,7 +301,7 @@ $trigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Monday,Wednesday,Friday 
 Register-ScheduledTask -TaskName "usajobs-monitor" -Action $action -Trigger $trigger
 ```
 
-The task picks up the user environment variables you set in steps 3 and 6.
+The task picks up the user environment variables you set in steps 3 and 6, and runs as you, so it can also read credentials saved with `usajobs-monitor credentials set`.
 
 ### GitHub Actions
 
@@ -362,7 +382,7 @@ __pycache__/
 Good habits:
 
 - **Keep your profile outside the repo**, for example in `~/usajobs/`, and pass it with `--config`. Then nothing personal can be committed by accident, whatever the `.gitignore` says.
-- **Keep credentials in environment variables**, never in the profile. The tool reads `USAJOBS_EMAIL` and `USAJOBS_API_KEY` from the environment, and `check-config` warns if it finds them in the file. Delivery secrets (SMTP password, webhook URLs, ntfy topic) are read only from the environment; the config file can't hold them at all.
+- **Keep credentials in environment variables or your keychain**, never in the profile. The tool reads `USAJOBS_EMAIL` and `USAJOBS_API_KEY` from the environment (or the keychain, with the `keyring` extra), and `check-config` warns if it finds them in the file. Delivery secrets (SMTP password, webhook URLs, ntfy topic) are read only from the environment or the keychain; the config file can't hold them at all.
 - **Check before your first push:** `git status --ignored` lists what's being ignored, and `git ls-files` lists what's tracked. Your config and data files should appear only in the first.
 - **Add a secret scanner** if you contribute often. [gitleaks](https://github.com/gitleaks/gitleaks) works as a pre-commit hook, and GitHub's secret scanning and push protection can be turned on under the repository's **Settings → Code security**.
 - **The tool never logs your key.** Errors name the setting that's missing or wrong, not its value. If you report a bug, paste `check-config` output rather than your config file.
@@ -371,7 +391,7 @@ Good habits:
 
 ## How a run works
 
-1. Load and validate the profile, then read credentials from the environment.
+1. Load and validate the profile, then read credentials from the environment, falling back to the keychain.
 2. Run each search, paging through every result. Network errors, rate limits (HTTP 429) and server errors are retried with backoff.
 3. Remove duplicates across searches by control number.
 4. Review each job: hiring-path eligibility, temporary appointment, executive pay plan or title, occupation fit, excluded series, target role signal, and salary. Each failed check is recorded with a reason.
@@ -387,7 +407,7 @@ Good habits:
 | 1 | Package layout, structured reason codes, config validation, generic profiles, tests, cross-platform lock | Done |
 | 2 | Grade-based targeting with OPM locality pay tables | Planned |
 | 3 | SMTP email, Discord/Slack/ntfy delivery with a send ledger | Done |
-| 3b | GitHub Actions workflow (done), optional `keyring` secrets (planned) | In progress |
+| 3b | GitHub Actions workflow, optional OS keychain secrets via `keyring` | Done |
 | 4 | `init` wizard, applicant-type presets, multiple profiles, `decide` command, HTML/CSV digests | Planned |
 | 5 | Optional AI add-on: résumé fit notes and an MCP server. The core never requires AI. | Planned |
 

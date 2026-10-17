@@ -18,7 +18,7 @@ Template: [examples/usajobs-monitor.example.toml](../examples/usajobs-monitor.ex
 5. **Near miss**: failed only on pay, eligibility route, or appointment type, and clears the near-miss pay and grade floors. Any **hard-no** reason (mismatch, executive, excluded series, another agency's internal posting, no role signal) keeps it off this list.
 6. **Hidden**: anything marked `not_interested` in the decisions file, whatever its list.
 
-## Credentials (environment only)
+## Credentials (environment or keychain)
 
 | Variable | Meaning |
 |---|---|
@@ -26,6 +26,8 @@ Template: [examples/usajobs-monitor.example.toml](../examples/usajobs-monitor.ex
 | `USAJOBS_API_KEY` | Your key from developer.usajobs.gov. |
 
 A `[credentials]` block in the file still works for backward compatibility; `check-config` warns when it is used, and the environment variables win if both exist.
+
+With the optional extra (`pip install "usajobs-monitor[keyring]"`), any credential or delivery secret can instead live in the OS keychain under the same variable name: `usajobs-monitor credentials set USAJOBS_API_KEY`. The order is environment variable, then keychain, then the file's `[credentials]` block. Keychain entries use the service `usajobs-monitor` and the variable name as the account; a custom `password_env` (or other `*_env`) name is looked up under that name. `USAJOBS_KEYRING=0` turns keychain lookups off. `usajobs-monitor credentials status --config PATH` shows where each value comes from without printing it.
 
 ## `[paths]`
 
@@ -107,7 +109,7 @@ Postings open to the public always pass.
 
 ## `[delivery]`
 
-Optional. Each `[delivery.<channel>]` table you add turns that channel on; with none, `run` reports delivery as `disabled` and reports stay in `paths.reports_dir`. Secrets are read **only** from environment variables: putting `password`, `webhook_url`, `topic` or `token` in the file is an error that names the variable to set instead. `check-config` reports each channel as `ready` or says what's missing, without printing values.
+Optional. Each `[delivery.<channel>]` table you add turns that channel on; with none, `run` reports delivery as `disabled` and reports stay in `paths.reports_dir`. Secrets are read **only** from environment variables or, with the `keyring` extra, the OS keychain under the same names: putting `password`, `webhook_url`, `topic` or `token` in the file is an error that names the variable to set instead. `check-config` reports each channel as `ready` or says what's missing, without printing values.
 
 | Key | Default | Meaning |
 |---|---|---|

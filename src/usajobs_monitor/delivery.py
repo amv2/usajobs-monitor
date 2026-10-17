@@ -2,8 +2,9 @@
 
 Delivery reads only the run's manifest, summary and the two hashed reports. A
 failed run sends a fixed failure notice with no attachments. Secrets come only
-from environment variables, and every message this module returns or records
-is fixed text that never includes a secret, a server response or an exception.
+from environment variables or the OS keychain, and every message this module
+returns or records is fixed text that never includes a secret, a server
+response or an exception.
 
 Each channel keeps a ledger in the run folder (``delivery-<channel>.json``).
 Once a channel records "sending", "accepted" or "unknown" for a run, it never
@@ -36,6 +37,7 @@ from typing import Any, Callable, Mapping
 from urllib.parse import urlsplit
 from xml.etree import ElementTree
 
+from . import keychain
 from .config import DELIVERY_CHANNELS, Settings
 from .digest import (
     ATTACHMENT_TYPES,
@@ -251,7 +253,7 @@ def _address(value: object) -> str:
 def _env_secret(env: Mapping[str, str], name: str, what: str) -> str:
     value = str(env.get(name) or "").strip()
     if not value:
-        raise DeliveryError(f"{what} is missing; set the {name} environment variable.")
+        raise DeliveryError(f"{what} is missing; set the {name} environment variable{keychain.missing_hint(env, name)}.")
     return value
 
 
@@ -542,7 +544,7 @@ def enabled_channels(config: Mapping[str, Any]) -> list[Channel]:
 
 def check_channels(config: Mapping[str, Any], env: Mapping[str, str] | None = None) -> list[tuple[str, str]]:
     """``(channel, "ready" or a safe problem)`` for each enabled channel, without sending."""
-    env = os.environ if env is None else env
+    env = keychain.environment() if env is None else env
     rows = []
     for channel in enabled_channels(config):
         try:
@@ -615,7 +617,7 @@ def deliver(run_dir: Path, settings: Settings, *, env: Mapping[str, str] | None 
     ``status`` is disabled, preview, accepted, already_accepted, failed or unknown;
     ``channels`` holds each channel's own result.
     """
-    env = os.environ if env is None else env
+    env = keychain.environment() if env is None else env
     config = settings.config
     options = config.get("delivery") or {}
     channels = enabled_channels(config)
