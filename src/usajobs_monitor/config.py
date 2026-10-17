@@ -63,6 +63,13 @@ TARGET_MATCH_MODES = ("at_grade", "above_grade")
 TARGET_FILTER_KEYS = ("salary_upper_must_exceed", "near_miss_upper_salary_must_exceed",
                       "near_miss_min_gs_grade", "min_gs_grade", "watch_list")
 ENV_NAME = r"[A-Za-z_][A-Za-z0-9_]{0,99}"
+# The optional AI add-on ([ai]); see fit.py. Nothing here is used unless asked for.
+AI_PROVIDERS = ("anthropic", "command")
+AI_PROVIDER_PATH = r"[A-Za-z_][\w.]*:[A-Za-z_]\w*"  # or "package.module:factory"
+AI_EFFORTS = ("low", "medium", "high", "xhigh", "max")
+AI_LISTS = ("matches", "watch_list", "near_misses")
+DEFAULT_AI_MODEL = "claude-opus-5-5"
+DEFAULT_AI_KEY_ENV = "ANTHROPIC_API_KEY"
 
 
 class ConfigError(Exception):
@@ -83,6 +90,7 @@ class Settings:
     decisions_path: Path
     resume_folder: Path | None
     warnings: list[str] = field(default_factory=list)
+    ai_resume: Path | None = None
 
     @property
     def history_path(self) -> Path:
@@ -206,7 +214,7 @@ def validate_config(raw: Mapping[str, Any]) -> tuple[dict[str, Any], list[str]]:
     _migrate_old_keys(config)
 
     check.unknown(config, "", {"version", "credentials", "paths", "profile", "search", "filters",
-                               "eligibility", "report", "scoring", "delivery", "target"})
+                               "eligibility", "report", "scoring", "delivery", "target", "ai"})
     if "version" in config and config["version"] != 1:
         check.error("version", "only version 1 is supported")
 
@@ -309,6 +317,7 @@ def validate_config(raw: Mapping[str, Any]) -> tuple[dict[str, Any], list[str]]:
         check.number(scoring, key, "scoring", default)
 
     _check_delivery(check, config)
+    _check_ai(check, config)
 
     if check.errors:
         raise ConfigError(check.errors)
@@ -474,6 +483,47 @@ def _check_delivery(check: _Checker, config: dict[str, Any]) -> None:
                 check.error(f"{path}.priority", "expected 1 to 5")
 
 
+def _check_ai(check: _Checker, config: dict[str, Any]) -> None:
+    """Types and defaults for the optional AI add-on. Nothing is sent anywhere
+    unless ``send_resume`` is true; the API key is read only from the environment
+    or the keychain."""
+    ai = check.section(config, "ai")
+    path = "ai"
+    if "api_key" in ai:
+        check.error("ai.api_key", "secrets are read only from environment variables or the keychain; remove it and set "
+                    + str(ai.get("api_key_env") or DEFAULT_AI_KEY_ENV))
+        del ai["api_key"]
+    check.unknown(ai, path, {"provider", "model", "effort", "api_key_env", "command", "resume", "send_resume",
+                             "fit_notes", "lists", "max_jobs", "timeout_seconds"})
+    check.string(ai, "provider", path, "anthropic")
+    provider = ai.get("provider")
+    if isinstance(provider, str) and provider not in AI_PROVIDERS and not re.fullmatch(AI_PROVIDER_PATH, provider):
+        check.error("ai.provider", 'expected "anthropic", "command", or "package.module:factory"')
+    check.string(ai, "model", path, DEFAULT_AI_MODEL)
+    check.string(ai, "effort", path, "medium", choices=AI_EFFORTS)
+    check.string(ai, "api_key_env", path, DEFAULT_AI_KEY_ENV)
+    if isinstance(ai.get("api_key_env"), str) and not re.fullmatch(ENV_NAME, ai["api_key_env"]):
+        check.error("ai.api_key_env", "expected an environment variable name like ANTHROPIC_API_KEY")
+    check.strings(ai, "command", path, [])
+    if provider == "command" and not ai.get("command"):
+        check.error("ai.command", 'required with provider = "command": the program and its arguments, as a list')
+    check.string(ai, "resume", path, "")
+    check.boolean(ai, "send_resume", path, False)
+    check.boolean(ai, "fit_notes", path, False)
+    check.strings(ai, "lists", path, ["matches", "watch_list"])
+    for index, name in enumerate(ai.get("lists") or []):
+        if isinstance(name, str) and name not in AI_LISTS:
+            check.error(f"ai.lists[{index}]", "expected one of " + ", ".join(f'"{n}"' for n in AI_LISTS))
+    for key, default, low, high in (("max_jobs", 10, 1, 50), ("timeout_seconds", 120, 5, 900)):
+        check.number(ai, key, path, default, integer=True)
+        value = ai.get(key)
+        if isinstance(value, int) and not isinstance(value, bool) and not low <= value <= high:
+            check.error(f"ai.{key}", f"expected {low} to {high}")
+    if ai.get("fit_notes") is True and ai.get("send_resume") is not True:
+        check.warnings.append("ai.fit_notes: needs ai.send_resume = true before your resume is sent to the "
+                              "AI provider; runs skip fit notes until then")
+
+
 def resolve_credentials(config: dict[str, Any], env: Mapping[str, str] | None = None) -> list[str]:
     """Put credentials into ``config["credentials"]``, preferring the environment,
     then the keychain, then the file.
@@ -541,6 +591,7 @@ def load_settings(path: Path | str, env: Mapping[str, str] | None = None, *,
         decisions_path=resolve(paths["decisions_file"]),
         resume_folder=resolve(paths["resume_folder"]) if paths["resume_folder"] else None,
         warnings=warnings,
+        ai_resume=resolve(config["ai"]["resume"]) if config["ai"]["resume"] else None,
     )
 
 

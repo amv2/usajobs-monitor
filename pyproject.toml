@@ -21,6 +21,10 @@ classifiers = [
 
 [project.optional-dependencies]
 keyring = ["keyring>=25"]
+# Optional AI add-on: resume fit notes (Claude API) and PDF resume reading.
+ai = ["anthropic>=1.15", "markitdown[pdf]>=0.1.2"]
+# Optional MCP server: search_jobs, screen_eligibility, explain_match.
+mcp = ["mcp>=1.10"]
 
 [project.scripts]
 usajobs-monitor = "usajobs_monitor.cli:main"

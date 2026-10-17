@@ -129,3 +129,14 @@ def search_all_jobs(config: dict[str, Any]) -> tuple[list[dict[str, Any]], int, 
             collect({**base_params, "Keyword": keyword, "RemoteIndicator": "true"})
 
     return jobs, calls, warnings
+
+
+def fetch_job(control_number: str, credentials: dict[str, str]) -> dict[str, Any] | None:
+    """One posting by its control number (the number in its USAJOBS link), or None."""
+    number = str(control_number).strip()
+    if not number.isdigit():
+        raise ValueError("a control number is the number in the job's USAJOBS link, e.g. 812345600")
+    payload = fetch_usajobs({"ControlNumber": number}, credentials["email"], credentials["api_key"])
+    jobs = [descriptor(item) for item in api_items(payload)]
+    from .jobs import job_id
+    return next((job for job in jobs if job_id(job) == number), None)

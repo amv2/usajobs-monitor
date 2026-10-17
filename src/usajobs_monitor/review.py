@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from .config import current_agency_terms, scoring
@@ -42,6 +42,8 @@ class ReviewResult:
     reasons: list[Reason]
     score: int
     eligibility_basis: str = ""
+    # (signal, points) in the order they were added, for explanations.
+    score_parts: list[tuple[str, float]] = field(default_factory=list)
 
 
 def contains_any(text: str, terms: list[str]) -> bool:
@@ -315,26 +317,32 @@ def review_job(job: dict[str, Any], config: dict[str, Any]) -> ReviewResult:
 
     # Role signals: the title is the strongest evidence, then the job series,
     # then keyword phrases found anywhere in the announcement.
-    score = keyword_score(text, search.get("target_role_keywords", [])) * weights["keyword"]
+    parts: list[tuple[str, float]] = []
+    keyword_hits = keyword_score(text, search.get("target_role_keywords", []))
+    if keyword_hits:
+        parts.append((f"{keyword_hits} target keyword{'s' if keyword_hits != 1 else ''} in the announcement",
+                      keyword_hits * weights["keyword"]))
     title = f" {as_text(job.get('PositionTitle')).lower()} "
     if contains_any(title, search.get("role_title_terms", [])):
-        score += weights["title"]
+        parts.append(("role title term in the title", weights["title"]))
     target_series = {str(code).strip() for code in search.get("target_job_series", [])}
     if target_series & set(job_series):
-        score += weights["series"]
+        parts.append(("target job series", weights["series"]))
     # A target agency raises the score but is not a role signal on its own;
     # otherwise any IT or facilities posting at a target agency would match.
-    if score == 0:
+    if sum(points for _, points in parts) == 0:
         reasons.append(Reason(Code.NO_ROLE_SIGNAL, "no target role signal (title term, job series, or keyword)"))
 
     if target_agency_hit(job, search.get("target_agencies", [])):
-        score += weights["target_agency"]
+        parts.append(("target agency", weights["target_agency"]))
     # Pay level ranks senior postings above junior ones among near misses and the watch list.
     if upper > salary_floor:
-        score += weights["above_salary_rule"]
+        parts.append(("upper pay above the salary rule", weights["above_salary_rule"]))
     elif upper >= weights["pay_tier_high"]:
-        score += weights["pay_high"]
+        parts.append(("upper pay in the high tier", weights["pay_high"]))
     elif upper >= weights["pay_tier_mid"]:
-        score += weights["pay_mid"]
+        parts.append(("upper pay in the middle tier", weights["pay_mid"]))
+    score = sum(points for _, points in parts)
 
-    return ReviewResult(job=job, kept=not reasons, reasons=reasons, score=score, eligibility_basis=eligibility_basis)
+    return ReviewResult(job=job, kept=not reasons, reasons=reasons, score=score, eligibility_basis=eligibility_basis,
+                        score_parts=parts)

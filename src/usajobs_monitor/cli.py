@@ -1,5 +1,5 @@
-"""Command line: ``usajobs-monitor init | run | deliver | search | decide | check-config | profiles |
-credentials | pay-table``."""
+"""Command line: ``usajobs-monitor init | run | deliver | search | decide | fit | mcp | check-config |
+profiles | credentials | pay-table``."""
 
 from __future__ import annotations
 
@@ -54,6 +54,7 @@ def cmd_check_config(args: argparse.Namespace) -> int:
             print(f"    eligibility.{key} = {json.dumps(value)}")
     from .reports import REPORT_LABELS, report_files
     print("  Reports: " + ", ".join(REPORT_LABELS[name] for name in report_files(settings.config)))
+    print("  " + _ai_status(settings))
     from .delivery import check_channels
     channels = check_channels(settings.config)
     if not channels:
@@ -61,6 +62,25 @@ def cmd_check_config(args: argparse.Namespace) -> int:
     for name, state in channels:
         print(f"  Delivery {name}: {state}")
     return 0
+
+
+def _ai_status(settings) -> str:
+    """One line on the optional AI add-on. Reads the resume's name, never its text."""
+    ai = settings.config["ai"]
+    if not ai["fit_notes"]:
+        return "AI fit notes: off"
+    from .resume_text import ResumeError, find_resume
+    try:
+        resume = find_resume(settings.ai_resume, settings.resume_folder).name
+    except ResumeError as exc:
+        resume = f"not found ({exc})"
+    provider = f"{ai['provider']} {ai['model']}" if ai["provider"] == "anthropic" else ai["provider"]
+    sending = "allowed" if ai["send_resume"] else "not allowed (set ai.send_resume = true)"
+    line = f"AI fit notes: on ({provider}); resume: {resume}; sending it to the provider: {sending}"
+    if ai["provider"] == "anthropic":
+        from . import keychain
+        line += f"; {ai['api_key_env']}: " + ("found" if keychain.environment().source(ai["api_key_env"]) else "missing")
+    return line
 
 
 def cmd_search(args: argparse.Namespace) -> int:
@@ -83,6 +103,9 @@ def cmd_search(args: argparse.Namespace) -> int:
     from .reports import REPORT_LABELS
     for name in summary["report_files"]:
         print(f"{REPORT_LABELS[name]}: {output / name}")
+    fit_notes = summary.get("fit_notes") or {}
+    if fit_notes.get("file"):
+        print(f"Fit notes ({fit_notes['notes']}, {fit_notes['from_cache']} reused): {output / fit_notes['file']}")
     return 0
 
 
@@ -238,6 +261,58 @@ def cmd_init(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_fit(args: argparse.Namespace) -> int:
+    """Fit notes for one posting, printed as Markdown."""
+    from .fit import SYSTEM_PROMPT, FitError, build_prompt, fit_note, make_provider, render_note
+    from .resume_text import ResumeError, find_resume, read_resume
+    from .tools import review_posting
+
+    settings = load_settings(args.config)
+    _print_warnings(settings.warnings)
+    ai = settings.config["ai"]
+    try:
+        resume_path = find_resume(args.resume or settings.ai_resume, settings.resume_folder)
+        resume = read_resume(resume_path)
+        result, tier = review_posting(settings, args.control_number)
+    except (ResumeError, ValueError) as exc:  # includes tools.ToolInputError
+        print(f"fit: {exc}", file=sys.stderr)
+        return 2
+    except RuntimeError as exc:
+        print(f"fit: {exc}", file=sys.stderr)
+        return 1
+    label = tier.replace("_", " ")
+    if args.preview:
+        print(f"Nothing was sent. This is what ai.provider = \"{ai['provider']}\" would receive "
+              f"for {resume_path.name}:\n")
+        print(f"--- system ---\n{SYSTEM_PROMPT}\n\n--- user ---\n{build_prompt(result, resume, label)}")
+        return 0
+    if ai["send_resume"] is not True:
+        print("fit: your resume is only sent to the AI provider when the config sets ai.send_resume = true. "
+              "Run with --preview to see exactly what would be sent.", file=sys.stderr)
+        return 2
+    try:
+        note = fit_note(result, resume, make_provider(ai), label)
+    except FitError as exc:
+        print(f"fit: {exc}", file=sys.stderr)
+        return 1
+    job = result.job
+    print(f"# {job.get('PositionTitle', '')}, {job.get('OrganizationName', '')}\n")
+    print(f"{label.capitalize()} · control number {args.control_number.strip()} · {job.get('PositionURI', '')}\n")
+    print(render_note(note))
+    return 0
+
+
+def cmd_mcp(args: argparse.Namespace) -> int:
+    from .mcp_server import serve
+
+    try:
+        serve(args.config)
+    except RuntimeError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    return 0
+
+
 def cmd_deliver(args: argparse.Namespace) -> int:
     from .runner import SUMMARY, run
 
@@ -271,6 +346,9 @@ def _credential_names(config_path: Path) -> list[tuple[str, bool]]:
         settings = delivery.get(channel)
         if isinstance(settings, dict) and settings.get("enabled", True):
             names += [(settings[key], key != "token_env") for key in DELIVERY_SECRET_ENV[channel]]
+    ai = load_settings(config_path, require_credentials=False).config["ai"]
+    if ai["provider"] == "anthropic" and (ai["fit_notes"] or ai["send_resume"]):
+        names.append((ai["api_key_env"], False))
     return names
 
 
@@ -389,6 +467,13 @@ def build_parser() -> argparse.ArgumentParser:
     decide.add_argument("control_number", nargs="?", help="the number in the job's USAJOBS link")
     decide.add_argument("status", nargs="?", help="applied, watching, not_interested, or clear to remove it")
     decide.add_argument("note", nargs="*", help="optional note, e.g. \"applied 10/17, referred\"")
+    fit = add("fit", "AI fit notes comparing your resume with one posting (needs the ai extra and "
+                     "ai.send_resume = true; --preview shows what would be sent, without sending).", cmd_fit)
+    fit.add_argument("control_number", help="the number in the job's USAJOBS link")
+    fit.add_argument("--resume", type=Path, help="this resume instead of ai.resume")
+    fit.add_argument("--preview", action="store_true", help="print the prompt instead of sending it")
+    add("mcp", "Serve search_jobs, screen_eligibility and explain_match to an MCP client over standard "
+               "input/output (needs the mcp extra).", cmd_mcp)
     profiles = sub.add_parser("profiles", help="List saved profiles.", description="List saved profiles.")
     profiles.set_defaults(func=cmd_profiles)
     credentials = sub.add_parser(
