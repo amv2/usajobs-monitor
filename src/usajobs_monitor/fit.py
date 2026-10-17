@@ -14,6 +14,10 @@ Providers are swappable (``ai.provider``):
 * ``"package.module:factory"``: your own Python provider. ``factory(ai_config,
   env)`` returns an object with ``complete(system, prompt) -> str``.
 
+The last two run code on this computer, so a profile alone can't turn them on:
+``USAJOBS_ALLOW_AI_PROVIDER`` in the environment must also list the program
+(``ai.command[0]``) or the factory path. A shared profile stays data.
+
 Every provider answers with the JSON object in ``FIT_SCHEMA``. Notes are cached
 by posting, resume and model, so a scheduled run pays only for new postings.
 """
@@ -40,6 +44,7 @@ from .jobs import (
     pay_plan_display,
     salary_display,
 )
+from .config import ai_provider_allowed, ai_provider_hint
 from .resume_text import ResumeError, find_resume, read_resume
 from .review import ReviewResult
 
@@ -182,6 +187,8 @@ def make_provider(ai: Mapping[str, Any], env: Mapping[str, str] | None = None) -
     env = keychain.environment() if env is None else env
     name = ai["provider"]
     timeout = float(ai["timeout_seconds"])
+    if not ai_provider_allowed(ai, env):
+        raise FitError(ai_provider_hint(ai), fatal=True)
     if name == "anthropic":
         key_env = ai["api_key_env"]
         key = str(env.get(key_env) or "").strip()
