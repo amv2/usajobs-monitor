@@ -58,7 +58,8 @@ def term_pattern(term: str) -> re.Pattern[str] | None:
     if not term:
         return None
     ending = r"[a-z0-9]*" if prefix else r"(?:s|es)?(?![a-z0-9])"
-    return re.compile(rf"(?<![a-z0-9]){re.escape(term).replace(r'\ ', r'\s+')}{ending}")
+    body = re.escape(term).replace(r"\ ", r"\s+")
+    return re.compile(r"(?<![a-z0-9])" + body + ending)
 
 
 def contains_term(text: str, term: str) -> bool:
