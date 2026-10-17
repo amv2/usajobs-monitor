@@ -70,5 +70,48 @@ class RetryTests(unittest.TestCase):
         self.assertNotIn("Remuneration", request.full_url)
 
 
+class NoRedirectTests(unittest.TestCase):
+    def test_redirect_is_an_error_and_the_key_never_follows(self):
+        import http.server
+        import threading
+        from urllib.request import Request
+        from usajobs_monitor.net import open_url
+
+        seen = []
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):  # noqa: N802
+                seen.append((self.path, self.headers.get("Authorization-Key")))
+                if self.path == "/start":
+                    self.send_response(302)
+                    self.send_header("Location", "/elsewhere")
+                    self.end_headers()
+                else:
+                    self.send_response(200)
+                    self.end_headers()
+                    self.wfile.write(b"{}")
+
+            def log_message(self, *args):
+                pass
+
+        server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        url = f"http://127.0.0.1:{server.server_port}/start"
+        with mock.patch.dict("os.environ", {"NO_PROXY": "127.0.0.1", "no_proxy": "127.0.0.1"}):
+            with self.assertRaises(HTTPError) as caught:
+                open_url(Request(url, headers={"Authorization-Key": "secret"}), 5)
+        self.assertEqual(caught.exception.code, 302)
+        self.assertEqual(seen, [("/start", "secret")])
+
+    def test_api_and_delivery_share_the_no_redirect_opener(self):
+        from usajobs_monitor import delivery, net
+        with mock.patch.object(net, "open_url", return_value="opened") as opened:
+            self.assertEqual(api.urlopen("request", 1), "opened")
+            self.assertEqual(delivery._open("request", 1), "opened")
+        self.assertEqual(opened.call_count, 2)
+
+
 if __name__ == "__main__":
     unittest.main()

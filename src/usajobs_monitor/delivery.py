@@ -37,7 +37,7 @@ from typing import Any, Callable, Mapping
 from urllib.parse import urlsplit
 from xml.etree import ElementTree
 
-from . import keychain
+from . import keychain, net
 from .config import DELIVERY_CHANNELS, Settings
 from .digest import (
     ATTACHMENT_TYPES,
@@ -408,16 +408,9 @@ class EmailChannel(Channel):
                     pass
 
 
-class _NoRedirect(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, *args, **kwargs):  # noqa: ANN002, ANN003
-        return None  # a redirect is reported as an HTTP error, never followed
-
-
 def _open(request: urllib.request.Request, timeout: int):
     """POST with certificate checks and no redirects. Honors HTTPS_PROXY."""
-    opener = urllib.request.build_opener(_NoRedirect(),
-                                         urllib.request.HTTPSHandler(context=ssl.create_default_context()))
-    return opener.open(request, timeout=timeout)
+    return net.open_url(request, timeout)
 
 
 class WebhookChannel(Channel):
