@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "usajobs-monitor"
+version = "0.1.0"
+description = "Scheduled USAJOBS search with eligibility screening, near misses and run-to-run tracking."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+dependencies = [
+    "python-docx>=1.2.0",
+    "openpyxl>=3.1.5",
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+    "Topic :: Office/Business",
+]
+
+[project.scripts]
+usajobs-monitor = "usajobs_monitor.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

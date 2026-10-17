@@ -1,0 +1,106 @@
+# usajobs-monitor sample profile
+# Copy to usajobs-monitor.toml, edit, then run:  usajobs-monitor check-config
+# Field-by-field notes: docs/CONFIG_REFERENCE.md
+#
+# Credentials are NOT stored here. Set them in your environment:
+#   export USAJOBS_EMAIL="you@example.com"     # must match the email you registered
+#   export USAJOBS_API_KEY="..."               # from https://developer.usajobs.gov/apirequest/
+
+version = 1
+
+[paths]
+# Relative paths resolve against this file's folder.
+reports_dir    = "reports"              # briefing, tracker, last_run.json, history
+decisions_file = "job_decisions.csv"    # your applied / not_interested / watching marks
+resume_folder  = ""                     # optional; PDFs here are listed in the briefing
+
+[profile]
+current_agency       = "Department of Example"   # "" if you are not a federal employee
+current_agency_terms = ["Department of Example", "DOE-X"]  # how postings name your agency
+
+[search]
+locations           = ["Washington, District of Columbia", "Arlington, Virginia", "Bethesda, Maryland"]
+radius_miles        = 35
+include_remote_jobs = false
+date_posted_days    = 14
+salary_query_floor  = 120000   # sent to USAJOBS; drops low-paying postings before download
+
+# Each keyword is searched in each location. These also count toward relevance.
+target_role_keywords = [
+  "Budget analyst",
+  "Financial management analyst",
+  "Budget execution",
+  "Program analyst budget",
+]
+# Searched to widen the net, but NOT counted as relevance (often boilerplate).
+search_only_keywords = ["Financial management", "Funds control"]
+
+# Relevance signals. A posting needs at least one of: a title term,
+# a target series, or a target_role_keyword in its text.
+role_title_terms  = ["budget", "financial", "finance", "accounting", "program analyst"]
+target_job_series = ["0501", "0560", "0343"]
+
+# Postings from these agencies rank higher. They are not a filter.
+target_agencies = ["Department of the Treasury", "Securities and Exchange Commission", "SEC"]
+
+[filters]
+# Pay: a match's posted upper salary must be above this amount.
+salary_upper_must_exceed = 197200   # 2026 GS pay cap: only postings that pay above GS-15
+# Near misses: listed if they failed only salary, eligibility route or appointment type
+# and their upper pay is above this amount (0 = no floor).
+near_miss_upper_salary_must_exceed = 187093   # roughly top-of-GS-14 pay in DC
+near_miss_min_gs_grade = 15                    # GS/GG/GM/GL postings must reach this grade
+
+# Exclusions (hard no: never shown as matches or near misses)
+mismatch_terms       = ["physician", "nurse", "pharmacist", "clinical", "law enforcement", "pilot"]
+mismatch_job_series  = ["0602", "0610", "0660", "1811", "2152"]
+excluded_job_series  = ["0510", "0511"]   # dropped only if EVERY listed series is excluded
+exclude_senior_executive = true           # SES, SL, ST and equivalents (built-in list)
+excluded_pay_plans   = []                 # extra pay plans to treat as executive, e.g. ["EM", "EO", "LL"]
+
+# Optional overrides. Leave out to use the built-in lists.
+# temporary_terms        = ["temporary promotion", "not to exceed", "term appointment", "detail assignment"]
+# senior_executive_terms = ["senior executive service", "executive director", "deputy director"]
+
+# Watch list: relevant postings at these pay plans and grades that failed ONLY the pay rule.
+[filters.watch_list]
+pay_plans = ["GS", "GG"]
+grades    = [15]
+
+[eligibility]
+service                 = "competitive"   # "competitive" | "excepted" | "none"
+has_competitive_status  = true
+interchange_agency      = ""              # excepted-service agency with an OPM interchange agreement
+additional_hiring_paths = []              # e.g. ["vet", "mspouse", "fed-transition"]
+
+[report]
+title = "USAJOBS Job Monitor"
+
+# Optional: tune ranking. These are the defaults.
+# [scoring]
+# keyword = 1
+# title = 3
+# series = 2
+# target_agency = 5
+# above_salary_rule = 2
+# pay_high = 2
+# pay_mid = 1
+# pay_tier_high = 185000
+# pay_tier_mid = 155000
+
+# Optional: deliver results. Add a table per channel. Secrets (SMTP password,
+# webhook URLs, ntfy topic) come only from environment variables; see the README.
+# [delivery]
+# notify_on_failure = true      # short notice, no attachments, when a run fails
+#
+# [delivery.email]
+# smtp_host    = "smtp.example.com"
+# security     = "ssl"          # "ssl" (465) or "starttls" (587)
+# username     = "you@example.com"
+# to_addresses = ["you@example.com"]
+# # password from USAJOBS_SMTP_PASSWORD
+#
+# [delivery.discord]            # webhook from USAJOBS_DISCORD_WEBHOOK_URL
+# [delivery.slack]              # webhook from USAJOBS_SLACK_WEBHOOK_URL
+# [delivery.ntfy]               # topic from USAJOBS_NTFY_TOPIC
+# server = "https://ntfy.sh"

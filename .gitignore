@@ -1,0 +1,32 @@
+# Personal configuration and credentials
+usajobs-monitor.toml
+config.json
+config.toml
+*.local.json
+*.local.toml
+usajobs_config.json
+.env
+.env.*
+*_env
+
+# Your search data
+job_decisions.csv
+usajobs_job_history.json
+reports/
+runs/
+previews/
+*.log
+
+# Python
+.venv/
+__pycache__/
+*.egg-info/
+build/
+dist/
+
+# Editors and OS
+.DS_Store
+*.bak-*
+
+# Local dev notes for Claude (not published)
+CLAUDE.md
