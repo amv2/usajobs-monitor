@@ -8,12 +8,14 @@ from typing import Any
 
 from .config import current_agency_terms, scoring
 from .jobs import (
+    GS_SCALE_PAY_PLANS,
     NON_PERMANENT_OFFERING_CODES,
     PERMANENT_OFFERING_CODE,
     as_text,
     collect_text,
     details,
     first_mapping,
+    grade_numbers,
     job_category_codes,
     job_pay_plans,
     mapping_list,
@@ -248,6 +250,18 @@ def pay_plan_reason(job: dict[str, Any], filters: dict[str, Any]) -> Reason | No
     return Reason(Code.EXCLUDED_PAY_PLAN, f"excluded pay plan ({', '.join(hits)})")
 
 
+def gs_grade_reason(job: dict[str, Any], min_grade: int | None) -> Reason | None:
+    """GS-scale postings whose top grade is below ``min_grade`` fail the pay rule.
+    Other pay plans are judged by dollars alone, so "GS-15 or equivalent" works."""
+    if not min_grade:
+        return None
+    plans = [plan.upper() for plan in job_pay_plans(job) if plan.upper() in GS_SCALE_PAY_PLANS]
+    numbers = grade_numbers(job)
+    if not plans or not numbers or max(numbers) >= int(min_grade):
+        return None
+    return Reason(Code.SALARY, f"top grade {plans[0]}-{max(numbers)} is below {plans[0]}-{int(min_grade)}")
+
+
 def review_job(job: dict[str, Any], config: dict[str, Any]) -> ReviewResult:
     filters = config["filters"]
     search = config["search"]
@@ -259,6 +273,10 @@ def review_job(job: dict[str, Any], config: dict[str, Any]) -> ReviewResult:
     salary_floor = float(filters.get("salary_upper_must_exceed") or 0)
     if upper <= salary_floor:
         reasons.append(Reason(Code.SALARY, f"posted upper salary ${upper:,.0f} does not exceed ${salary_floor:,.0f}"))
+    else:
+        grade_reason = gs_grade_reason(job, filters.get("min_gs_grade"))
+        if grade_reason:
+            reasons.append(grade_reason)
 
     eligibility_basis, eligibility_reason = eligibility_screen(job, config)
     internal_other = not eligibility_basis and is_internal_other_agency(job, current_agency_terms(config))

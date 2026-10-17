@@ -93,7 +93,8 @@ class ValidationTests(unittest.TestCase):
         for path in [ROOT / "examples" / "usajobs-monitor.example.toml", ROOT / "profiles" / "financial-management-dc.toml"]:
             with self.subTest(path=path.name):
                 settings = load_settings(path, require_credentials=False)
-                self.assertEqual(settings.warnings, [])
+                # The samples use the newest bundled pay table, which warns once a newer year starts.
+                self.assertEqual([w for w in settings.warnings if not w.startswith("target.year:")], [])
 
 
 class SettingsTests(unittest.TestCase):

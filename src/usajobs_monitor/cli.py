@@ -1,4 +1,4 @@
-"""Command line: ``usajobs-monitor run | deliver | search | check-config | credentials``."""
+"""Command line: ``usajobs-monitor run | deliver | search | check-config | credentials | pay-table``."""
 
 from __future__ import annotations
 
@@ -35,6 +35,16 @@ def cmd_check_config(args: argparse.Namespace) -> int:
     print(f"  Reports folder: {settings.reports_dir}")
     print(f"  Decisions file: {settings.decisions_path}"
           + ("" if settings.decisions_path.is_file() else " (not created yet)"))
+    from .config import target_label
+    target = target_label(settings.config)
+    if target:
+        resolved = settings.config["target"]["resolved"]
+        print(f"  Pay target: {target}")
+        for key, value in resolved["applied"].items():
+            shown = f"${value:,}" if isinstance(value, int) and "salary" in key else json.dumps(value)
+            print(f"    filters.{key} = {shown}")
+        for key in resolved["overridden"]:
+            print(f"    filters.{key}: set in your config, so the target value is not used")
     from .delivery import check_channels
     channels = check_channels(settings.config)
     if not channels:
@@ -168,6 +178,30 @@ def cmd_credentials(args: argparse.Namespace) -> int:
         return 2
 
 
+def cmd_pay_table(args: argparse.Namespace) -> int:
+    from .paytables import MAX_GRADE, STEPS, available_years, load_table
+
+    try:
+        table = load_table(args.year or available_years()[-1])
+        code = table.find_locality(args.locality) if args.locality else None
+    except LookupError as exc:
+        print(f"pay-table: {exc}", file=sys.stderr)
+        return 2
+    if code is None:
+        print(f"OPM locality pay areas, {table.year} (use the code or name as target.locality):")
+        for area in sorted(table.localities.values(), key=lambda a: a.name):
+            print(f"  {area.code:<4} {area.percent:>6}%  {area.name}")
+    else:
+        area = table.localities[code]
+        print(f"{table.year} GS pay, {area.name} ({code}, locality {area.percent}%), "
+              f"limited to ${table.pay_cap:,}")
+        print("Grade " + "".join(f"{'Step ' + str(step):>10}" for step in range(1, STEPS + 1)))
+        for grade in range(1, MAX_GRADE + 1):
+            print(f"GS-{grade:<3}" + "".join(f"{table.rate(grade, step, code):>10,}" for step in range(1, STEPS + 1)))
+    print("Sources: " + "; ".join(table.sources))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="usajobs-monitor", description="Scheduled, filtered USAJOBS search.")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
@@ -208,6 +242,11 @@ def build_parser() -> argparse.ArgumentParser:
     store.add_argument("--stdin", action="store_true", help="read the value from the first line of standard input")
     remove = actions.add_parser("delete", help="remove a saved secret")
     remove.add_argument("name", help="the variable name, for example USAJOBS_API_KEY")
+    pay = sub.add_parser("pay-table", help="List OPM locality areas, or show one area's GS pay table.",
+                         description="List OPM locality areas, or show one area's GS pay table.")
+    pay.add_argument("locality", nargs="?", help='an OPM locality code or name, e.g. "DCB" or "Seattle"')
+    pay.add_argument("--year", type=int, help="pay table year (default: the newest bundled)")
+    pay.set_defaults(func=cmd_pay_table)
     return parser
 
 

@@ -43,13 +43,22 @@ target_job_series = ["0501", "0560", "0343"]
 # Postings from these agencies rank higher. They are not a filter.
 target_agencies = ["Department of the Treasury", "Securities and Exchange Commission", "SEC"]
 
+# Pay: name the GS grade you want and your OPM locality pay area. The dollar
+# floors are computed from OPM's pay table for that area (bundled with the tool).
+# Run `usajobs-monitor pay-table` to list areas and `check-config` to see the floors.
+[target]
+grade    = 14
+locality = "Washington-Baltimore-Arlington"   # a code like "DCB" or a name like "Seattle"
+# match  = "at_grade"      # default: GS-14 postings, or other pay plans paying more than GS-13 can
+#                          # "above_grade": only postings paying more than GS-14 can
+# year   = 2026            # default: the newest bundled table
+
 [filters]
-# Pay: a match's posted upper salary must be above this amount.
-salary_upper_must_exceed = 197200   # 2026 GS pay cap: only postings that pay above GS-15
-# Near misses: listed if they failed only salary, eligibility route or appointment type
-# and their upper pay is above this amount (0 = no floor).
-near_miss_upper_salary_must_exceed = 187093   # roughly top-of-GS-14 pay in DC
-near_miss_min_gs_grade = 15                    # GS/GG/GM/GL postings must reach this grade
+# Optional: dollar floors you set here override the [target] values.
+# salary_upper_must_exceed           = 158322   # a match's posted upper salary must be above this
+# near_miss_upper_salary_must_exceed = 133142   # near misses must top out above this (0 = no floor)
+# near_miss_min_gs_grade             = 13       # GS/GG/GM/GL near misses must reach this grade
+# min_gs_grade                       = 14       # GS/GG/GM/GL matches must reach this grade
 
 # Exclusions (hard no: never shown as matches or near misses)
 mismatch_terms       = ["physician", "nurse", "pharmacist", "clinical", "law enforcement", "pilot"]
@@ -63,9 +72,10 @@ excluded_pay_plans   = []                 # extra pay plans to treat as executiv
 # senior_executive_terms = ["senior executive service", "executive director", "deputy director"]
 
 # Watch list: relevant postings at these pay plans and grades that failed ONLY the pay rule.
+# With match = "above_grade" the target fills this in for you.
 [filters.watch_list]
 pay_plans = ["GS", "GG"]
-grades    = [15]
+grades    = [13]
 
 [eligibility]
 service                 = "competitive"   # "competitive" | "excepted" | "none"

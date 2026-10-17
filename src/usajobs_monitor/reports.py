@@ -19,6 +19,7 @@ from .jobs import (
     promotion_potential_display,
     salary_display,
 )
+from .config import target_label
 from .reasons import code_of
 from .review import SENIOR_EXECUTIVE_PAY_PLANS, ReviewResult, applicant_label, target_agency_hit
 from .tracking import CLOSING_SOON_DAYS, RunView, near_miss_reason_text, watch_list_label
@@ -68,6 +69,11 @@ def active_filters_text(config: dict[str, Any], decisions_name: str) -> list[str
     salary = float(filters.get("salary_upper_must_exceed") or 0)
     line = (f"Compensation: posted upper salary must exceed {_money(salary)}." if salary
             else "Compensation: no minimum posted salary.")
+    if filters.get("min_gs_grade"):
+        line += f" GS-scale postings must also reach grade {filters['min_gs_grade']}."
+    target = target_label(config)
+    if target:
+        line += f" Pay floors are set from your target, {target}."
     watch = watch_list_label(config)
     if watch != "Watch list":
         line += f" Postings that fail only this rule are shown on the {watch}."
@@ -327,6 +333,7 @@ def write_excel(path: Path, results: list[ReviewResult], config: dict[str, Any],
         ("Hidden as not interested", len(view.hidden)),
         ("Resumes", resume_note(resumes)),
         ("Salary rule", f"Upper salary must exceed {_money(config['filters'].get('salary_upper_must_exceed'))}"),
+        *([("Pay target", target_label(config))] if target_label(config) else []),
         ("Your decisions file", str(decisions_path)),
     ]
     for row in summary_rows:

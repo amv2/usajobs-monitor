@@ -54,11 +54,17 @@ target_agencies = [
   "Office of the Comptroller of the Currency", "OCC",
 ]
 
-[filters]
-salary_upper_must_exceed           = 197200   # 2026 GS pay cap: only roles paying above GS-15
-near_miss_upper_salary_must_exceed = 187093   # roughly top-of-GS-14 pay in DC
-near_miss_min_gs_grade             = 15
+# Pay floors come from OPM's GS-15 pay in the DC locality. "above_grade" means
+# matches must pay more than GS-15 can (the pay cap, $197,200 in 2026); GS/GG-15
+# postings that fail only on pay go to the watch list, and near misses must top
+# out above GS-14 step 10 ($187,093 in 2026). `usajobs-monitor check-config`
+# prints the dollar figures; a value set under [filters] overrides the target.
+[target]
+grade    = 15
+locality = "Washington-Baltimore-Arlington"   # OPM locality area; `usajobs-monitor pay-table` lists them
+match    = "above_grade"
 
+[filters]
 mismatch_terms = [
   "physician", "radiologist", "psychiatrist", "nurse", "dentist", "pharmacist", "clinical",
   "emergency response", "hazardous materials", "law enforcement", "pilot", "air traffic",
@@ -67,10 +73,6 @@ mismatch_job_series = ["0602", "0610", "0620", "0660", "0680", "0083", "1811", "
 excluded_job_series = ["0905", "0510", "0511"]   # attorney; accountant and auditor need 24 accounting credit hours
 exclude_senior_executive = true
 excluded_pay_plans       = ["EM", "EO", "LL"]    # FDIC and FHFA executive plans
-
-[filters.watch_list]
-pay_plans = ["GS", "GG"]
-grades    = [15]
 
 [eligibility]
 service                 = "competitive"

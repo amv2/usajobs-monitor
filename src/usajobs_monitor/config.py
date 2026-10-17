@@ -11,6 +11,7 @@ block in the file is still accepted, with a warning.
 from __future__ import annotations
 
 import copy
+import datetime
 import json
 import re
 from dataclasses import dataclass, field
@@ -55,6 +56,10 @@ DELIVERY_SECRET_ENV = {
     "ntfy": {"topic_env": "USAJOBS_NTFY_TOPIC", "token_env": "USAJOBS_NTFY_TOKEN"},
 }
 SMTP_SECURITY = {"ssl": 465, "starttls": 587}
+TARGET_MATCH_MODES = ("at_grade", "above_grade")
+# Pay floors a [target] fills in. A value set in [filters] always wins.
+TARGET_FILTER_KEYS = ("salary_upper_must_exceed", "near_miss_upper_salary_must_exceed",
+                      "near_miss_min_gs_grade", "min_gs_grade", "watch_list")
 ENV_NAME = r"[A-Za-z_][A-Za-z0-9_]{0,99}"
 
 
@@ -199,7 +204,7 @@ def validate_config(raw: Mapping[str, Any]) -> tuple[dict[str, Any], list[str]]:
     _migrate_old_keys(config)
 
     check.unknown(config, "", {"version", "credentials", "paths", "profile", "search", "filters",
-                               "eligibility", "report", "scoring", "delivery"})
+                               "eligibility", "report", "scoring", "delivery", "target"})
     if "version" in config and config["version"] != 1:
         check.error("version", "only version 1 is supported")
 
@@ -231,13 +236,15 @@ def validate_config(raw: Mapping[str, Any]) -> tuple[dict[str, Any], list[str]]:
     check.strings(search, "target_agencies", "search", [])
 
     filters = check.section(config, "filters")
+    _check_target(check, config, filters)
     check.unknown(filters, "filters", {"salary_upper_must_exceed", "near_miss_upper_salary_must_exceed",
-                                       "near_miss_min_gs_grade", "watch_list", "mismatch_terms",
+                                       "near_miss_min_gs_grade", "min_gs_grade", "watch_list", "mismatch_terms",
                                        "mismatch_job_series", "excluded_job_series", "exclude_senior_executive",
                                        "excluded_pay_plans", "senior_executive_terms", "temporary_terms"})
     check.number(filters, "salary_upper_must_exceed", "filters", 0)
     check.number(filters, "near_miss_upper_salary_must_exceed", "filters", 0)
     check.number(filters, "near_miss_min_gs_grade", "filters", None, integer=True)
+    check.number(filters, "min_gs_grade", "filters", None, integer=True)
     check.strings(filters, "mismatch_terms", "filters", [])
     check.strings(filters, "mismatch_job_series", "filters", [], pattern=r"\d{4}", hint=series_hint)
     check.strings(filters, "excluded_job_series", "filters", [], pattern=r"\d{4}", hint=series_hint)
@@ -289,6 +296,83 @@ def validate_config(raw: Mapping[str, Any]) -> tuple[dict[str, Any], list[str]]:
     if check.errors:
         raise ConfigError(check.errors)
     return config, check.warnings
+
+
+def _check_target(check: _Checker, config: dict[str, Any], filters: dict[str, Any]) -> None:
+    """Turn ``[target]`` (a GS grade plus an OPM locality) into the dollar and grade
+    floors in ``[filters]``. Only keys missing from ``[filters]`` are filled in, so
+    hand-entered floors keep working exactly as before."""
+    if config.get("target") is None:
+        config.pop("target", None)
+        return
+    target = check.section(config, "target")
+    check.unknown(target, "target", {"pay_plan", "grade", "locality", "year", "match"})
+    check.string(target, "pay_plan", "target", "GS", choices=("GS",))
+    check.string(target, "locality", "target")
+    check.string(target, "match", "target", "at_grade", choices=TARGET_MATCH_MODES)
+    from .paytables import MAX_GRADE, available_years, load_table
+
+    grade = target.get("grade")
+    if grade is None:
+        check.error("target.grade", "required: a GS grade from 1 to 15")
+    elif isinstance(grade, bool) or not isinstance(grade, int) or not 1 <= grade <= MAX_GRADE:
+        check.error("target.grade", "expected a GS grade from 1 to 15")
+    years = available_years()
+    year = target.get("year")
+    if year is None:
+        target["year"] = year = years[-1]
+        if datetime.date.today().year > year:
+            check.warnings.append(f"target.year: no {datetime.date.today().year} pay table is bundled yet; "
+                                  f"using {year}. Set target.year to silence this.")
+    elif isinstance(year, bool) or not isinstance(year, int) or year not in years:
+        check.error("target.year", "expected a bundled pay table year: " + ", ".join(map(str, years)))
+    if any(e.startswith("target.") for e in check.errors):
+        return
+    table = load_table(year)
+    try:
+        code = table.find_locality(target["locality"])
+    except LookupError as exc:
+        check.error("target.locality", str(exc))
+        return
+
+    cap_minus_one = table.pay_cap - 1
+    if target["match"] == "above_grade":
+        # Matches pay more than the target grade can; target-grade GS postings
+        # that fail only on pay go to the watch list.
+        derived = {
+            "salary_upper_must_exceed": table.top_of_grade(grade, code),
+            "near_miss_upper_salary_must_exceed": table.top_of_grade(grade - 1, code),
+            "near_miss_min_gs_grade": grade,
+            "watch_list": {"pay_plans": ["GS", "GG"], "grades": [grade]},
+        }
+    else:
+        # Matches reach the target grade: GS-scale postings by grade, other pay
+        # plans by paying more than the top of the grade below. The pay cap can
+        # flatten adjacent grades, so a floor never reaches the cap itself.
+        derived = {
+            "salary_upper_must_exceed": min(table.top_of_grade(grade - 1, code), cap_minus_one),
+            "min_gs_grade": grade,
+            "near_miss_upper_salary_must_exceed": min(table.top_of_grade(grade - 2, code), cap_minus_one),
+            "near_miss_min_gs_grade": grade - 1 if grade > 1 else None,
+        }
+    applied = {}
+    for key, value in derived.items():
+        if filters.get(key) is None:
+            filters[key] = copy.deepcopy(value)
+            applied[key] = value
+    target["resolved"] = {"locality_code": code, "locality_name": table.localities[code].name,
+                          "pay_cap": table.pay_cap, "applied": applied,
+                          "overridden": sorted(set(derived) - set(applied))}
+
+
+def target_label(config: Mapping[str, Any]) -> str | None:
+    """'GS-15 in Washington-Baltimore-Arlington, DC-MD-VA-WV-PA (2026 OPM pay table)', or None."""
+    target = config.get("target") or {}
+    resolved = target.get("resolved")
+    if not resolved:
+        return None
+    return (f"{target['pay_plan']}-{target['grade']} in {resolved['locality_name']} "
+            f"({target['year']} OPM pay table)")
 
 
 def _check_delivery(check: _Checker, config: dict[str, Any]) -> None:

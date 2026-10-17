@@ -128,7 +128,8 @@ Every key, its default and what it does is listed in the [config reference](docs
 | `[paths]` | Where reports, run history and your decisions file live. Relative paths resolve against the config file's folder. |
 | `[profile]` | Your current agency and the names postings use for it. Leave it blank if you aren't a federal employee. |
 | `[search]` | What to ask USAJOBS for: locations and radius, keywords, how recent, a salary floor for the query, and the relevance signals (title terms, job series). |
-| `[filters]` | Pay rules, the watch list, near-miss floors, and the exclusions. |
+| `[target]` | Optional. The GS grade you're after and your OPM locality pay area. The tool turns them into the dollar pay floors for you. |
+| `[filters]` | Pay rules, the watch list, near-miss floors, and the exclusions. Dollar floors set here override `[target]`. |
 | `[eligibility]` | The hiring paths you qualify for: competitive or excepted service, competitive status, an interchange agreement, and extra USAJOBS hiring paths such as `vet` or `mspouse`. |
 | `[report]` | The title on your reports. |
 | `[scoring]` | Optional ranking weights. Leave it out to use the defaults. |
@@ -145,8 +146,11 @@ target_role_keywords = ["Budget analyst", "Financial management analyst"]
 role_title_terms     = ["budget", "financial", "accounting"]
 target_job_series    = ["0501", "0560"]
 
+[target]
+grade    = 14                                 # GS-14 or equivalent
+locality = "Washington-Baltimore-Arlington"   # your OPM locality pay area
+
 [filters]
-salary_upper_must_exceed = 197200   # posted top pay must be above this
 mismatch_terms           = ["nurse", "physician", "pilot"]
 excluded_job_series      = ["0510", "0511"]
 
@@ -163,7 +167,8 @@ How the main settings work together:
 | `search_only_keywords` | Searched to widen the net, but not counted as relevance, because many phrases show up in application boilerplate. |
 | `role_title_terms`, `target_job_series` | A job needs at least one *target role signal* (a title term, a target series, or a target keyword) or it's a hard no. |
 | `target_agencies` | Ranks those agencies higher. It doesn't filter anything out. |
-| `salary_upper_must_exceed` | A match's posted top salary must be above this. |
+| `target.grade`, `target.locality` | Sets the pay floors below from OPM's pay table for that grade and area (see [Pay floors from a GS grade](#pay-floors-from-a-gs-grade)). |
+| `salary_upper_must_exceed` | A match's posted top salary must be above this. Set it yourself to override the target. |
 | `watch_list` | Pay plans and grades you still want to see when pay is the only failing check, for example GS/GG-15. |
 | `near_miss_upper_salary_must_exceed`, `near_miss_min_gs_grade` | Pay and grade floors for the near-miss list. |
 | `mismatch_terms`, `mismatch_job_series` | Wrong occupation. Terms match whole words in the title only, so boilerplate like "from doctors to nurses" doesn't exclude a budget job. |
@@ -172,7 +177,34 @@ How the main settings work together:
 
 **Tip:** run once, then read the near misses and the reason each one failed. They show you what each setting is filtering out, which is the fastest way to tune it.
 
-*(Planned, phase 2)* Target "GS-14 or equivalent" in a locality and let the tool compute the salary floors from OPM's locality pay tables, instead of typing dollar figures.
+### Pay floors from a GS grade
+
+Instead of typing dollar amounts, name the grade you want and where you work. The tool looks up OPM's General Schedule pay table for that locality pay area and computes the floors. The tables ship with the tool, one per year, so no network call is made.
+
+```toml
+[target]
+grade    = 15
+locality = "DCB"          # an OPM code, or a name such as "Washington-Baltimore-Arlington" or "Seattle"
+match    = "at_grade"     # the default; see below
+# year   = 2026           # the newest bundled table by default
+```
+
+| `match` | Matches | Near misses |
+|---|---|---|
+| `"at_grade"` (default) | GS-scale postings (GS, GG, GM, GL) whose top grade reaches your grade, and other pay plans whose top pay beats step 10 of the grade below in your area. This is "GS-15 or equivalent". | One grade lower: top grade at least grade − 1 and top pay above step 10 of grade − 2. |
+| `"above_grade"` | Only postings that pay more than step 10 of your grade in your area. GS/GG postings at your grade that fail only on pay go to the watch list. | Top grade at least your grade, and top pay above step 10 of the grade below. |
+
+For GS-15 in Washington, DC in 2026, `above_grade` gives exactly the floors the sample profile used to type by hand: $197,200 (the pay cap) for matches and $187,093 (GS-14 step 10) for near misses. Where the pay cap makes two grades pay the same, `at_grade` keeps its floor $1 under the cap so capped postings at your grade still count.
+
+Run `usajobs-monitor check-config` to see the dollar figures your target produces. Any floor you set under `[filters]` wins over the target, so existing configs with typed amounts behave exactly as before. To browse the tables:
+
+```bash
+usajobs-monitor pay-table             # every locality area and its percentage
+usajobs-monitor pay-table Seattle     # one area's GS-1 to GS-15 rates
+```
+
+The 2026 table comes from [Executive Order 14368](https://public-inspection.federalregister.gov/2025-23844.pdf) (Schedule 1 for base rates, Schedule 9 for locality percentages, Schedule 5 for the level IV pay cap) and matches OPM's [published 2026 tables](https://www.opm.gov/policy-data-oversight/pay-leave/salaries-wages/2026/general-schedule/). Rates are computed the way OPM does it: base × (1 + locality %), rounded to the dollar, capped at Executive Schedule level IV. Special rates, LEO rates and non-GS pay systems aren't modeled; those postings are judged by their posted pay.
+
 *(Planned, phase 4)* `usajobs-monitor init`, a setup wizard with presets by applicant type (current federal employee, excepted service, veteran, military spouse, public, Pathways, reinstatement).
 
 ## 5. Run it
@@ -405,7 +437,7 @@ Good habits:
 | Phase | Scope | State |
 |---|---|---|
 | 1 | Package layout, structured reason codes, config validation, generic profiles, tests, cross-platform lock | Done |
-| 2 | Grade-based targeting with OPM locality pay tables | Planned |
+| 2 | Grade-based targeting with OPM locality pay tables | Done |
 | 3 | SMTP email, Discord/Slack/ntfy delivery with a send ledger | Done |
 | 3b | GitHub Actions workflow, optional OS keychain secrets via `keyring` | Done |
 | 4 | `init` wizard, applicant-type presets, multiple profiles, `decide` command, HTML/CSV digests | Planned |
