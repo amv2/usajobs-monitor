@@ -2,7 +2,7 @@
 
 A scheduled job search for [USAJOBS](https://www.usajobs.gov) that does the filtering a keyword search can't. You describe the jobs you want and the hiring paths you qualify for in one config file, and each run gives you a short list of postings worth reading, a watch list, and the near misses, with a reason for every job it set aside.
 
-> **Status:** early. The core search, filtering, tracking and reports (phase 1) are ported from a personal tool that runs three times a week, delivery by email, Discord, Slack and ntfy is in, it can run on GitHub Actions, and `usajobs-monitor init` sets up a profile for you. Features marked *(planned)* aren't in the package yet. See [Roadmap](#roadmap).
+> **Status:** early. The core search, filtering, tracking and reports (phase 1) are ported from a personal tool that runs three times a week, delivery by email, Discord, Slack and ntfy is in, it can run on GitHub Actions, `usajobs-monitor init` sets up a profile for you, and an optional AI add-on writes resume fit notes and serves the search to AI assistants over MCP. Features marked *(planned)* aren't in the package yet. See [Roadmap](#roadmap).
 
 ## What it does
 
@@ -20,6 +20,7 @@ A scheduled job search for [USAJOBS](https://www.usajobs.gov) that does the filt
 - **Remembers between runs.** Each job is flagged **NEW** the first time it appears and **CLOSING SOON** when three days or less remain, and jobs that disappeared are noted. You can record a decision (applied, not interested, watching) so a job stops nagging you.
 - **Runs safely on a schedule.** Each run works in its own folder and publishes reports only after they pass validation. A lock stops two runs from overlapping, and a failed run never overwrites the last good report or puts raw errors in anything that gets sent to you.
 - **Delivers results where you'll see them.** Email through any SMTP server with the reports attached, or a short digest to Discord, Slack or ntfy. A retry never sends the same run twice.
+- **Optional AI help, off by default.** With the `ai` extra, each run can add short notes comparing your resume with each match (strengths, gaps, resume wording to fix), using the Claude API or a model you run yourself. With the `mcp` extra, an AI assistant such as Claude Desktop can search and screen postings through your profile. Nothing in the core needs either one, and your resume is sent only when you turn that on.
 - **Sets itself up.** `usajobs-monitor init` asks a few questions and writes your profile, with starting eligibility for your applicant type: current federal employee, excepted service, veteran, military spouse, student, recent graduate, former federal employee, Schedule A, or the general public.
 
 Output is your choice of an HTML digest (`usajobs_digest.html`), a CSV of every job reviewed (`usajobs_jobs.csv`), a Word briefing (`usajobs_briefing.docx`) and an Excel tracker (`usajobs_tracker.xlsx`), plus a `usajobs_last_run.json` summary. Profiles written by `init` use HTML and CSV; older profiles keep Word and Excel until you set [`report.formats`](docs/CONFIG_REFERENCE.md#report-and-scoring).
@@ -433,13 +434,83 @@ After that it runs on its own. Good to know:
 - **Failures.** A run that fails to search or deliver fails the workflow, and GitHub emails you about failed runs by default. Re-running a failed workflow searches again rather than resending the old run.
 - **Inactivity.** GitHub can disable scheduled workflows after 60 days with no repository activity; its documentation says this applies to public repositories. If it happens, re-enable the workflow from the **Actions** tab.
 
+## 8. Optional: AI fit notes and an MCP server
+
+Everything above works without AI. This section adds two optional pieces.
+
+### Resume fit notes
+
+For each match (and watch-list job, by default), a model reads the posting's qualifications, duties and specialized experience statement next to your resume and writes a short note: a fit level (strong, possible, stretch or unlikely), the resume evidence for it, gaps, wording to change so an HR specialist gives you credit, and anything to confirm before applying. Notes land in `usajobs_fit_notes.md` next to the other reports.
+
+```bash
+pip install -e ".[ai]"                       # Claude API client, plus PDF resume reading
+usajobs-monitor credentials set ANTHROPIC_API_KEY   # or export ANTHROPIC_API_KEY=...
+```
+
+Get an API key from the [Claude Console](https://platform.claude.com/). Then add to your profile:
+
+```toml
+[ai]
+resume      = "resume.md"   # .md, .txt, .docx or .pdf; relative to this file
+send_resume = true          # required: without it your resume never leaves your computer
+fit_notes   = true          # add notes to every run
+# lists    = ["matches", "watch_list"]   # also "near_misses"
+# max_jobs = 10                          # at most this many postings per run
+# model    = "claude-opus-5-5"
+# effort   = "medium"                    # low, medium, high, xhigh or max
+```
+
+Notes are cached by posting, resume and model, so a run three times a week pays only for postings it hasn't reviewed yet. Changing your resume refreshes them. A failed note never fails the run: the reports still publish, and the reason is in the run summary.
+
+To check one posting first, or to see exactly what would be sent:
+
+```bash
+usajobs-monitor fit 812345600 --preview   # prints the prompt and your resume text; sends nothing
+usajobs-monitor fit 812345600             # sends it and prints the note
+```
+
+**Privacy.** Your resume is read on your computer. It goes to the provider only when `ai.send_resume = true`, and only with postings from your own search. With the default provider that's Anthropic's API, under your API account's [data terms](https://www.anthropic.com/legal/commercial-terms). The posting and resume are passed to the model as data with instructions to ignore any instructions inside them. Fit notes are written by a model, so read the announcement before you rely on them.
+
+**Other models.** Set `ai.provider = "command"` and `ai.command = ["ollama", "run", "llama3.1"]` (or any program) to keep everything on your computer: the prompt goes to the program's standard input, and it must print the JSON answer. You can also point `ai.provider` at your own Python factory, `"my_package.my_module:make_provider"`; see [`fit.py`](src/usajobs_monitor/fit.py) for the interface.
+
+### MCP server
+
+`usajobs-monitor mcp` serves three read-only tools over the [Model Context Protocol](https://modelcontextprotocol.io), so an assistant can search with your filters and explain its answers:
+
+| Tool | What it does |
+|---|---|
+| `search_jobs` | Searches USAJOBS (one keyword and place, or your whole profile) and returns postings sorted into matches, watch list and near misses, with the failed checks for each. |
+| `screen_eligibility` | For one control number: its hiring paths, who may apply, and whether your applicant type has a route in. |
+| `explain_match` | For one control number: its list, every failed check with its code, the relevance score by signal, and your decision if you recorded one. |
+
+```bash
+pip install -e ".[mcp]"
+```
+
+Then add it to your MCP client. For Claude Desktop, in `claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "usajobs": {
+      "command": "/path/to/usajobs-monitor/.venv/bin/usajobs-monitor",
+      "args": ["mcp", "--profile", "default"]
+    }
+  }
+}
+```
+
+For Claude Code: `claude mcp add usajobs -- /path/to/.venv/bin/usajobs-monitor mcp --profile default`.
+
+The server reads credentials the same way runs do (environment, then keychain), reloads your profile on every call, and accepts a `profile` argument to use another saved profile. It never changes decisions or history, and it never reads or returns your resume. Screening results are aids, not eligibility determinations.
+
 ## Keeping secrets out of the repo
 
 Your API key is tied to your email address. Your profile, decisions file and reports describe your job search and your eligibility. None of it belongs in version control.
 
 **What's safe to commit:** code, tests, docs, `examples/usajobs-monitor.example.toml` and the de-personalized files in `profiles/`.
 
-**What never is** (in a public repository): your own config, `.env` files, `job_decisions.csv`, `usajobs_job_history.json`, `reports/` (including the run folders and delivery previews) and logs.
+**What never is** (in a public repository): your own config, your resume, `.env` files, `job_decisions.csv`, `usajobs_job_history.json`, `reports/` (including the run folders and delivery previews) and logs.
 
 The repo's `.gitignore` already covers the defaults:
 
@@ -458,6 +529,8 @@ usajobs_config.json
 # Your search data
 job_decisions.csv
 usajobs_job_history.json
+usajobs_fit_notes*
+resume.*
 reports/
 runs/
 previews/
@@ -472,7 +545,7 @@ __pycache__/
 Good habits:
 
 - **Keep your profile outside the repo**, for example in `~/usajobs/`, and pass it with `--config`. Then nothing personal can be committed by accident, whatever the `.gitignore` says.
-- **Keep credentials in environment variables or your keychain**, never in the profile. The tool reads `USAJOBS_EMAIL` and `USAJOBS_API_KEY` from the environment (or the keychain, with the `keyring` extra), and `check-config` warns if it finds them in the file. Delivery secrets (SMTP password, webhook URLs, ntfy topic) are read only from the environment or the keychain; the config file can't hold them at all.
+- **Keep credentials in environment variables or your keychain**, never in the profile. The tool reads `USAJOBS_EMAIL` and `USAJOBS_API_KEY` from the environment (or the keychain, with the `keyring` extra), and `check-config` warns if it finds them in the file. Delivery secrets (SMTP password, webhook URLs, ntfy topic) and the AI provider's API key are read only from the environment or the keychain; the config file can't hold them at all.
 - **Check before your first push:** `git status --ignored` lists what's being ignored, and `git ls-files` lists what's tracked. Your config and data files should appear only in the first.
 - **Add a secret scanner** if you contribute often. [gitleaks](https://github.com/gitleaks/gitleaks) works as a pre-commit hook, and GitHub's secret scanning and push protection can be turned on under the repository's **Settings → Code security**.
 - **The tool never logs your key.** Errors name the setting that's missing or wrong, not its value. If you report a bug, paste `check-config` output rather than your config file.
@@ -499,7 +572,7 @@ Good habits:
 | 3 | SMTP email, Discord/Slack/ntfy delivery with a send ledger | Done |
 | 3b | GitHub Actions workflow, optional OS keychain secrets via `keyring` | Done |
 | 4 | `init` wizard, applicant-type presets, multiple profiles, `decide` command, HTML/CSV outputs | Done |
-| 5 | Optional AI add-on: résumé fit notes and an MCP server. The core never requires AI. | Planned |
+| 5 | Optional AI add-on: résumé fit notes and an MCP server. The core never requires AI. | Done |
 
 ## Contributing
 

@@ -118,6 +118,11 @@ def run_search(settings: Settings, output_dir: Path, *, today: date | None = Non
     if CSV_NAME in files:
         write_csv(output_dir / CSV_NAME, results, view)
     (output_dir / HISTORY).write_text(json.dumps(view.history, indent=2, sort_keys=True), encoding="utf-8")
+    fit_notes = {"status": "off"}
+    if (config.get("ai") or {}).get("fit_notes"):
+        from .fit import run_fit_notes  # the optional AI add-on; never fails the search
+        fit_notes = run_fit_notes(settings, view, output_dir, today or date.today())
+    fit_warnings = [f"Fit notes: {fit_notes['message']}"] if fit_notes.get("message") else []
 
     target_agencies = config["search"].get("target_agencies", [])
     summary = {
@@ -132,7 +137,8 @@ def run_search(settings: Settings, output_dir: Path, *, today: date | None = Non
         "near_misses_reported": len(view.near),
         "watch_list_count": len(view.watch),
         "watch_list_label": watch_list_label(config),
-        "search_warnings": search_warnings + decision_warnings,
+        "search_warnings": search_warnings + decision_warnings + fit_warnings,
+        "fit_notes": fit_notes,
         "history_baseline": view.baseline,
         "new_since_last_run": {
             "matches": view.new_count(view.matches),
@@ -254,6 +260,12 @@ def publish_latest(run_dir: Path, reports: Path, summary: dict) -> None:
     history = run_dir / HISTORY
     if history.is_file() and not history.is_symlink():
         atomic_write(reports / HISTORY, history.read_bytes())
+    # Fit notes (optional AI add-on) and their cache advance the same way.
+    from .fit import FIT_CACHE_NAME, FIT_NOTES_NAME
+    for name in (FIT_NOTES_NAME, FIT_CACHE_NAME):
+        source = run_dir / name
+        if source.is_file() and not source.is_symlink():
+            atomic_write(reports / name, source.read_bytes())
     latest = dict(summary)
     _add_report_paths(latest, reports)
     write_json(reports / SUMMARY, latest)

@@ -209,6 +209,26 @@ Tapping the notification opens the first listed job.
 
 Each channel writes `delivery-<channel>.json` into the run folder with `status` `sending`, `accepted`, `unknown` or `failed`. Anything but `failed` blocks a resend of that run to that channel. `usajobs-monitor deliver <run id>` retries only the channels that failed. The outcome of each run, with every channel's result, is in the run folder's `outcome.json` and in `usajobs_delivery_last_run.json` in `paths.reports_dir`.
 
+## `[ai]` (optional AI add-on)
+
+Off unless you set `fit_notes = true` or run `usajobs-monitor fit`. Needs `pip install "usajobs-monitor[ai]"` for the default provider and for PDF resumes. The MCP server (`usajobs-monitor mcp`, `[mcp]` extra) needs no settings here.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `fit_notes` | `false` | Write `usajobs_fit_notes.md` with each run. |
+| `send_resume` | `false` | Must be `true` before your resume text goes to the provider. Without it, runs skip fit notes and `fit` only previews. |
+| `resume` | `""` | Your resume: `.md`, `.txt`, `.docx` or `.pdf` (relative paths are from this file). Empty uses the only resume in `paths.resume_folder`. |
+| `provider` | `"anthropic"` | `"anthropic"` (Claude API), `"command"` (a local program), or `"package.module:factory"` for your own provider. |
+| `model` | `"claude-opus-5-5"` | Claude model for the `anthropic` provider. |
+| `effort` | `"medium"` | `low`, `medium`, `high`, `xhigh` or `max`. Higher is more thorough and costs more. |
+| `api_key_env` | `"ANTHROPIC_API_KEY"` | The variable (or keychain entry) holding the API key. A key in the file is an error. |
+| `command` | `[]` | For `provider = "command"`: the program and its arguments. It gets the prompt on standard input and must print the JSON answer. |
+| `lists` | `["matches", "watch_list"]` | Which lists get notes; `"near_misses"` is also allowed. |
+| `max_jobs` | `10` | At most this many postings per run (1–50), best first. |
+| `timeout_seconds` | `120` | Per posting (5–900). |
+
+Notes are cached in `usajobs_fit_notes_cache.json` in `paths.reports_dir` for 45 days, keyed by posting, resume text and model, so unchanged postings cost nothing on later runs. A failed note is reported in `fit_notes` and `search_warnings` in `usajobs_last_run.json` and never fails the run.
+
 ## Old keys (current `usajobs_config.json`)
 
 All current keys keep their meaning. Four move, and the old location is still read:

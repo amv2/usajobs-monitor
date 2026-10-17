@@ -12,6 +12,8 @@ usajobs_config.json
 # Your search data
 job_decisions.csv
 usajobs_job_history.json
+usajobs_fit_notes*
+resume.*
 reports/
 runs/
 previews/
