@@ -12,7 +12,7 @@ from typing import Any
 
 from .jobs import GS_SCALE_PAY_PLANS, close_date, grade_numbers, job_id, job_pay_plans, job_url, salary_upper
 from .reasons import Code, code_of, is_hard_no
-from .review import ReviewResult
+from .review import VERIFY_ELIGIBILITY_FLAG, ReviewResult, needs_eligibility_check
 
 HISTORY_NAME = "usajobs_job_history.json"
 DECISION_STATUSES = {"applied", "not_interested", "watching"}
@@ -212,6 +212,8 @@ def build_view(results: list[ReviewResult], config: dict[str, Any], history: dic
         tags = []
         if not baseline and number not in previous:
             tags.append("NEW")
+        if r.kept and needs_eligibility_check(r):
+            tags.append(VERIFY_ELIGIBILITY_FLAG)
         closes = close_date(r.job)
         if closes is not None and 0 <= (closes - today).days <= CLOSING_SOON_DAYS:
             tags.append("CLOSING SOON")

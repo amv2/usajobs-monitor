@@ -146,6 +146,16 @@ def applicant_label(config: dict[str, Any]) -> str:
     return f"{agency} {service_text} profile" if agency else f"{service_text} profile"
 
 
+# A special-authorities badge is weak evidence of an interchange route, so these
+# matches carry a VERIFY ELIGIBILITY flag instead of reading as a confirmed fit.
+SPECIAL_AUTHORITIES_BASIS = "Special authorities advertised"
+VERIFY_ELIGIBILITY_FLAG = "VERIFY ELIGIBILITY"
+
+
+def needs_eligibility_check(result: "ReviewResult") -> bool:
+    return result.eligibility_basis.startswith(SPECIAL_AUTHORITIES_BASIS)
+
+
 INTERCHANGE_DENIAL = re.compile(
     r"interchange.{0,100}\b(?:not accepted|not eligible|not considered|ineligible|excluded)\b"
     r"|(?:do not|does not|will not|cannot) (?:accept|consider).{0,80}interchange"
@@ -196,8 +206,9 @@ def eligibility_screen(job: dict[str, Any], config: dict[str, Any]) -> tuple[str
         if interchange_basis and not interchange_denied:
             return interchange_basis, None
         if "special-authorities" in paths and not interchange_denied:
-            return (f"Special authorities advertised; potential {interchange_agency} interchange route, "
-                    "subject to announcement-specific coverage and SF-50 requirements"), None
+            return (f"{SPECIAL_AUTHORITIES_BASIS}; potential {interchange_agency} interchange route. The badge also "
+                    "covers Schedule A, VRA and other authorities, so confirm the announcement accepts interchange "
+                    "candidates and check SF-50 requirements"), None
 
     other_paths = paths & text_values(profile.get("additional_hiring_paths"))
     if other_paths:
