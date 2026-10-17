@@ -1,9 +1,10 @@
-"""Command line: ``usajobs-monitor run | deliver | search | check-config [--config PATH]``."""
+"""Command line: ``usajobs-monitor run | deliver | search | check-config | credentials``."""
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -104,6 +105,69 @@ def cmd_deliver(args: argparse.Namespace) -> int:
     return code
 
 
+CREDENTIAL_NAMES = ("USAJOBS_EMAIL", "USAJOBS_API_KEY")
+
+
+def _credential_names(config_path: Path) -> list[tuple[str, bool]]:
+    """``(variable, required)`` for the API credentials and each enabled channel's secrets."""
+    from .config import DELIVERY_CHANNELS, DELIVERY_SECRET_ENV
+
+    names = [(name, True) for name in CREDENTIAL_NAMES]
+    if not config_path.is_file():
+        return names
+    delivery = load_settings(config_path, require_credentials=False).config.get("delivery") or {}
+    for channel in DELIVERY_CHANNELS:
+        settings = delivery.get(channel)
+        if isinstance(settings, dict) and settings.get("enabled", True):
+            names += [(settings[key], key != "token_env") for key in DELIVERY_SECRET_ENV[channel]]
+    return names
+
+
+def cmd_credentials(args: argparse.Namespace) -> int:
+    from . import keychain
+
+    try:
+        if args.action == "status":
+            env = keychain.environment()
+            print(f"Keychain: {keychain.backend_description()}")
+            for name, required in _credential_names(args.config):
+                source = env.source(name)
+                if source == "environment":
+                    label = "set in the environment"
+                    if env.store is not None and env.store.get(name):
+                        label += " (also in the keychain; the environment wins)"
+                elif source == "keychain":
+                    label = "stored in the keychain"
+                else:
+                    label = "missing" if required else "not set (optional)"
+                print(f"  {name}: {label}")
+            return 0
+        name = keychain.check_name(args.name)
+        store = keychain.default_store()
+        if store is None:
+            print(f"No keychain available: {keychain.backend_description()}.", file=sys.stderr)
+            return 2
+        if args.action == "delete":
+            print(f"Removed {name} from the keychain." if store.delete(name) else f"{name} was not in the keychain.")
+            return 0
+        if args.stdin:
+            value = sys.stdin.readline().strip()
+        else:
+            import getpass
+            value = getpass.getpass(f"{name} (input hidden): ").strip()
+        if not value:
+            print("Nothing entered; the keychain was not changed.", file=sys.stderr)
+            return 2
+        store.set(name, value)
+        print(f"Saved {name} to the keychain.")
+        if str(os.environ.get(name) or "").strip():
+            print(f"warning: {name} is also set in the environment, which wins over the keychain.", file=sys.stderr)
+        return 0
+    except keychain.KeychainError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="usajobs-monitor", description="Scheduled, filtered USAJOBS search.")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
@@ -129,6 +193,21 @@ def build_parser() -> argparse.ArgumentParser:
     search = add("search", "Search and write reports directly, without run isolation.", cmd_search)
     search.add_argument("--output-dir", type=Path, help="write reports here instead of paths.reports_dir")
     add("check-config", "Validate the config and report what a run would do. Never prints credentials.", cmd_check_config)
+    credentials = sub.add_parser(
+        "credentials", help="Store or check credentials in the OS keychain. Never prints a secret.",
+        description="Store or check credentials in the OS keychain (macOS Keychain, Windows Credential "
+                    "Manager, Linux Secret Service). Needs the keyring extra. Environment variables win "
+                    "over the keychain. Never prints a secret.")
+    credentials.set_defaults(func=cmd_credentials)
+    actions = credentials.add_subparsers(dest="action", required=True)
+    status = actions.add_parser("status", help="show where each credential comes from, without values")
+    status.add_argument("--config", type=Path, default=Path(DEFAULT_CONFIG_NAME),
+                        help="also list the delivery secrets this config needs")
+    store = actions.add_parser("set", help="save a secret; prompts without echoing")
+    store.add_argument("name", help="the variable name, for example USAJOBS_API_KEY")
+    store.add_argument("--stdin", action="store_true", help="read the value from the first line of standard input")
+    remove = actions.add_parser("delete", help="remove a saved secret")
+    remove.add_argument("name", help="the variable name, for example USAJOBS_API_KEY")
     return parser
 
 

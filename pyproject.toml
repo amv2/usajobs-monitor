@@ -19,6 +19,9 @@ classifiers = [
     "Topic :: Office/Business",
 ]
 
+[project.optional-dependencies]
+keyring = ["keyring>=25"]
+
 [project.scripts]
 usajobs-monitor = "usajobs_monitor.cli:main"
 
