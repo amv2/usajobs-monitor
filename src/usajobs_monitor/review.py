@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 import re
 from dataclasses import dataclass, field
 from typing import Any
@@ -46,14 +47,31 @@ class ReviewResult:
     score_parts: list[tuple[str, float]] = field(default_factory=list)
 
 
+@functools.lru_cache(maxsize=1024)
+def term_pattern(term: str) -> re.Pattern[str] | None:
+    """Whole words, so "ses" doesn't match "processes" and "finance" doesn't match
+    "refinance". A plural "s" still matches, and a trailing "*" matches any ending
+    ("financ*" matches "finance" and "financial")."""
+    term = re.sub(r"\s+", " ", str(term or "").strip().lower())
+    prefix = term.endswith("*")
+    term = term.rstrip("*").strip()
+    if not term:
+        return None
+    ending = r"[a-z0-9]*" if prefix else r"(?:s|es)?(?![a-z0-9])"
+    return re.compile(rf"(?<![a-z0-9]){re.escape(term).replace(r'\ ', r'\s+')}{ending}")
+
+
+def contains_term(text: str, term: str) -> bool:
+    pattern = term_pattern(term)
+    return bool(pattern and pattern.search(text.lower()))
+
+
 def contains_any(text: str, terms: list[str]) -> bool:
-    lower = text.lower()
-    return any(term.lower() in lower for term in terms)
+    return any(contains_term(text, term) for term in terms)
 
 
 def keyword_score(text: str, keywords: list[str]) -> int:
-    lower = text.lower()
-    return sum(1 for keyword in keywords if keyword.lower() in lower)
+    return sum(1 for keyword in keywords if contains_term(text, keyword))
 
 
 def text_values(value: Any) -> set[str]:

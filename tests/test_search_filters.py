@@ -50,6 +50,21 @@ class PagingTests(unittest.TestCase):
         self.assertEqual(([j["PositionID"] for j in jobs], calls, warnings), ([1, 2, 3, 4], 4, []))
 
 
+class WholeWordTermTests(unittest.TestCase):
+    def test_terms_match_whole_words(self):
+        cases = [("Processes Clerk", " ses ", False), ("Director, SES Programs", " ses ", True),
+                 ("Refinance Analyst", "finance", False), ("Finance Officer", "finance", True),
+                 ("Budget Analysts", "budget analyst", True), ("Budget  Analyst", "budget analyst", True),
+                 ("Determination Specialist", "term ", False), ("Program Analyst (Term)", "term ", True),
+                 ("Financial Analyst", "financ*", True), ("Financial Analyst", "finance", False)]
+        for text, term, expected in cases:
+            with self.subTest(text=text, term=term):
+                self.assertIs(review.contains_any(f" {text.lower()} ", [term]), expected)
+
+    def test_keywords_count_whole_words(self):
+        self.assertEqual(review.keyword_score("Refinance the budgets; budgetary review", ["finance", "budget"]), 1)
+
+
 class SeniorExecutiveTests(unittest.TestCase):
     config = {
         "search": {"target_role_keywords": ["budget analyst"], "target_agencies": []},
