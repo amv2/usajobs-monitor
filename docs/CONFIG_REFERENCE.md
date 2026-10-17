@@ -63,17 +63,48 @@ Relative paths resolve against the config file's folder, not the current directo
 
 A posting with no title term, no target series and no target keyword fails with "no target role signal" (hard no).
 
+## `[target]`
+
+Optional. Computes the pay floors in `[filters]` from OPM's General Schedule table for one grade and locality pay area, so you don't type dollar figures. Only floors you leave out of `[filters]` are filled in. `check-config` prints the values it used.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `grade` | required | GS grade, 1 to 15. |
+| `locality` | required | OPM locality pay area: a code (`"DCB"`, `"RUS"`), the full name, or words that identify one area (`"Seattle"`, `"Washington, DC"`). `usajobs-monitor pay-table` lists them. An ambiguous name like `"San"` is an error that lists the candidates. |
+| `match` | `"at_grade"` | `at_grade` or `above_grade`; see below. |
+| `year` | newest bundled | Pay table year. Bundled: 2026. Leaving it out follows new tables as they ship; `check-config` warns when the calendar year has no table yet. |
+| `pay_plan` | `"GS"` | Only `GS` is supported. |
+
+What it fills in, with `top(g)` = step 10 of grade *g* in your area, after the pay cap (`top(0)` = 0):
+
+| Key | `at_grade` | `above_grade` |
+|---|---|---|
+| `salary_upper_must_exceed` | `top(grade − 1)`, at most cap − 1 | `top(grade)` |
+| `min_gs_grade` | `grade` | not set |
+| `near_miss_upper_salary_must_exceed` | `top(grade − 2)`, at most cap − 1 | `top(grade − 1)` |
+| `near_miss_min_gs_grade` | `grade − 1` | `grade` |
+| `watch_list` | not set | `pay_plans = ["GS", "GG"]`, `grades = [grade]` |
+
+The cap − 1 limit matters where the cap flattens grades: in San Francisco GS-14 step 10 is already $197,200, so a floor of exactly the cap would shut out GS-15 postings. `grade = 15`, `locality = "DCB"`, `match = "above_grade"` reproduces the original hand-typed floors (197,200, 187,093, grade 15, GS/GG-15 watch list).
+
+Rates are base × (1 + locality %), rounded to the nearest dollar, capped at Executive Schedule level IV, which is how OPM builds its tables. Sources for each year are listed inside `src/usajobs_monitor/paytables/gs-<year>.json` and printed by `pay-table`. 2026: [Executive Order 14368](https://public-inspection.federalregister.gov/2025-23844.pdf) Schedules 1, 5 and 9, checked against OPM's [2026 GS tables](https://www.opm.gov/policy-data-oversight/pay-leave/salaries-wages/2026/general-schedule/).
+
+**Adding a year:** copy the newest `gs-<year>.json`, replace `year`, `effective`, `sources`, `pay_cap`, the `base` table (the Executive Order's Schedule 1) and each `percent` (Schedule 9; codes and names come from OPM's locality table list), then add a few published rows to `tests/test_paytables.py`.
+
 ## `[filters]`
 
 **Salary and grade**
 
 | Key | Default | Meaning |
 |---|---|---|
-| `salary_upper_must_exceed` | `0` | A match's posted *upper* salary must be above this. The sample uses the GS pay cap (197,200 in 2026) to show only roles paying above GS-15. |
+| `salary_upper_must_exceed` | `0` | A match's posted *upper* salary must be above this. The GS pay cap (197,200 in 2026) shows only roles paying above GS-15. |
 | `near_miss_upper_salary_must_exceed` | `0` | Near misses must top out above this. `0` turns the floor off. |
-| `near_miss_min_gs_grade` | none | For GS-scale postings (GS, GG, GM, GL), the top grade must reach this for a near miss. Other pay plans are judged by pay alone. This is the grade floor; Phase 2 adds "GS-15 or equivalent plus locality" targeting that computes the dollar floors for you. |
+| `near_miss_min_gs_grade` | none | For GS-scale postings (GS, GG, GM, GL), the top grade must reach this for a near miss. Other pay plans are judged by pay alone. |
+| `min_gs_grade` | none | For GS-scale postings, the top grade must reach this for a match. A posting below it fails the pay rule ("top grade GS-14 is below GS-15"), so it can still be a near miss or on the watch list. Other pay plans are judged by `salary_upper_must_exceed` alone. |
 | `watch_list.pay_plans` | `[]` | Pay plans for the watch list, for example `["GS", "GG"]`. |
 | `watch_list.grades` | `[]` | Grades for the watch list. A posting qualifies when its grade range includes one. Empty `watch_list` = no watch list. |
+
+Every key in this table except `watch_list` under `at_grade` can come from `[target]` instead; a value you set here always wins.
 
 **Exclusions** (all hard no)
 
