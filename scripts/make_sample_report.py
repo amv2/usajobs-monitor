@@ -1,11 +1,14 @@
 """Regenerate the README's sample report from made-up postings.
 
 Runs the real pipeline offline against the sample profile, with invented
-agencies and control numbers, so nothing personal or real goes into the repo:
+agencies and control numbers, so nothing personal or real goes into the repo.
+It runs twice, so the saved report is a follow-up run with NEW and CLOSING SOON
+badges rather than a first (baseline) run:
 
     python scripts/make_sample_report.py
-    # then, to refresh the picture (needs Chrome or Chromium):
-    chromium --headless --hide-scrollbars --window-size=900,1215 \
+    # then, to refresh the picture (needs Chrome or Chromium), capture the page
+    # tall and crop it just below the near-misses card (about 1870 px):
+    chromium --headless --hide-scrollbars --window-size=900,3000 \
         --screenshot=docs/sample/digest.png docs/sample/usajobs_digest.html
 """
 
@@ -13,6 +16,7 @@ from __future__ import annotations
 
 import shutil
 import tempfile
+from datetime import date, timedelta
 from pathlib import Path
 from unittest import mock
 
@@ -48,6 +52,9 @@ JOBS = [
     posting(104, "Program Analyst (Term)", "Department of Example", upper=205000),
     posting(105, "Registered Nurse", "Example Health Service", upper=205000, series="0610"),
 ]
+# Posted after the first run, so the second run flags it NEW; it closes in two days.
+LATER = [posting(106, "Budget Officer", "Example Science Foundation", upper=203500,
+                 closes=(date.today() + timedelta(days=2)).isoformat())]
 
 
 def main() -> None:
@@ -59,10 +66,11 @@ def main() -> None:
         settings.config["report"]["formats"] = ["html"]
         settings.config["report"]["title"] = "Sample report (made-up postings)"
         settings.config["eligibility"]["interchange_agency"] = "Example Agency"
-        with mock.patch.object(api, "search_all_jobs", return_value=(JOBS, 1, [])):
-            code, outcome = runner.run(settings)
-        if code != 0:
-            raise SystemExit(f"sample run failed: {outcome}")
+        for jobs in (JOBS[:3] + JOBS[4:], JOBS + LATER):
+            with mock.patch.object(api, "search_all_jobs", return_value=(jobs, 1, [])):
+                code, outcome = runner.run(settings)
+            if code != 0:
+                raise SystemExit(f"sample run failed: {outcome}")
         OUT.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(settings.reports_dir / HTML_NAME, OUT / HTML_NAME)
     print(f"wrote {OUT / HTML_NAME}")

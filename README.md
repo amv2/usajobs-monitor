@@ -27,7 +27,7 @@ Output is your choice of an HTML digest (`usajobs_digest.html`), a CSV of every 
 
 ### What a report looks like
 
-![The HTML digest from a sample run: two matches, one flagged VERIFY ELIGIBILITY, and a GS/GG-15 watch list](docs/sample/digest.png)
+![The HTML digest from a sample follow-up run: three matches with NEW, CLOSING SOON and VERIFY ELIGIBILITY badges, a GS/GG-15 watch list and a near miss](docs/sample/digest.png)
 
 This is the HTML digest from [a sample run](docs/sample/usajobs_digest.html) with made-up postings and agencies. [`scripts/make_sample_report.py`](scripts/make_sample_report.py) regenerates it offline.
 
