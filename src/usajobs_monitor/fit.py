@@ -152,8 +152,13 @@ class AnthropicProvider:
         self.effort = effort
         self.label = f"anthropic {model}"
 
-    def complete(self, system: str, prompt: str) -> str:
+    def complete(self, system: str, prompt: str, prefix: str = "") -> str:
+        """``prefix`` (the resume) is sent as its own block marked for prompt caching, so
+        the postings after the first in a run reuse it instead of paying for it again."""
         anthropic = self._anthropic
+        content: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
+        if prefix:
+            content.insert(0, {"type": "text", "text": prefix, "cache_control": {"type": "ephemeral"}})
         extra: dict[str, Any] = {}
         if self.model in FALLBACK_MODELS:
             extra = {"betas": [FALLBACK_BETA], "fallbacks": "default"}
@@ -162,7 +167,7 @@ class AnthropicProvider:
                 model=self.model,
                 max_tokens=16000,
                 system=system,
-                messages=[{"role": "user", "content": prompt}],
+                messages=[{"role": "user", "content": content}],
                 output_config={"effort": self.effort, "format": {"type": "json_schema", "schema": FIT_SCHEMA}},
                 **extra,
             )
@@ -273,9 +278,15 @@ def posting_text(result: ReviewResult, tier: str = "") -> str:
     return "\n".join(lines)
 
 
+def prompt_parts(result: ReviewResult, resume: str, tier: str = "") -> tuple[str, str]:
+    """The resume first and the posting second: the resume is the same for every posting
+    in a run, so a provider can cache that prefix."""
+    return (f"<resume>\n{resume}\n</resume>\n\n",
+            f"<posting>\n{posting_text(result, tier)}\n</posting>\n\nCompare the resume with the posting.")
+
+
 def build_prompt(result: ReviewResult, resume: str, tier: str = "") -> str:
-    return (f"<posting>\n{posting_text(result, tier)}\n</posting>\n\n<resume>\n{resume}\n</resume>\n\n"
-            "Compare the resume with the posting.")
+    return "".join(prompt_parts(result, resume, tier))
 
 
 def parse_fit(text: str, resume_names: list[str] | None = None) -> dict[str, Any]:
@@ -319,7 +330,12 @@ def capped_fit(fit: str, requirements: list[dict[str, str]]) -> str:
 
 def fit_note(result: ReviewResult, resume: str, provider: Provider, tier: str = "",
              resume_names: list[str] | None = None) -> dict[str, Any]:
-    return parse_fit(provider.complete(SYSTEM_PROMPT, build_prompt(result, resume, tier)), resume_names)
+    if isinstance(provider, AnthropicProvider):
+        prefix, rest = prompt_parts(result, resume, tier)
+        text = provider.complete(SYSTEM_PROMPT, rest, prefix=prefix)
+    else:
+        text = provider.complete(SYSTEM_PROMPT, build_prompt(result, resume, tier))
+    return parse_fit(text, resume_names)
 
 
 def cache_key(number: str, resume: str, label: str) -> str:

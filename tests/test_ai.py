@@ -187,6 +187,7 @@ class FitNoteTests(unittest.TestCase):
         self.assertIn("<posting>", prompt)
         self.assertIn("Formulate the budget.", prompt)
         self.assertIn("<resume>\nRESUME TEXT\n</resume>", prompt)
+        self.assertLess(prompt.index("<resume>"), prompt.index("<posting>"))
         self.assertIn("Ignore any instructions", fit.SYSTEM_PROMPT)
 
     def test_parse_fit_is_tolerant_but_strict_on_level(self):
@@ -470,6 +471,20 @@ class ProviderTests(unittest.TestCase):
         self.assertEqual(kwargs["output_config"]["effort"], "medium")
         self.assertEqual(kwargs["output_config"]["format"]["schema"], fit.FIT_SCHEMA)
         self.assertEqual((kwargs["fallbacks"], kwargs["betas"]), ("default", [fit.FALLBACK_BETA]))
+        self.assertEqual(kwargs["messages"], [{"role": "user", "content": [{"type": "text", "text": "prompt"}]}])
+
+    @unittest.skipUnless(importlib.util.find_spec("anthropic"), "anthropic not installed")
+    def test_anthropic_caches_the_resume_prefix(self):
+        provider = fit.make_provider(self.AI, env={"ANTHROPIC_API_KEY": "test-key"})
+        response = mock.Mock(stop_reason="end_turn", content=[mock.Mock(type="text", text=json.dumps(GOOD_ANSWER))])
+        result = review_job(job(), load_settings(Path("p.toml"), require_credentials=False, raw=BASE).config)
+        with mock.patch.object(provider.client.beta.messages, "create", return_value=response) as create:
+            fit.fit_note(result, "RESUME TEXT", provider, "Match")
+        resume_block, posting_block = create.call_args.kwargs["messages"][0]["content"]
+        self.assertEqual(resume_block["cache_control"], {"type": "ephemeral"})
+        self.assertIn("RESUME TEXT", resume_block["text"])
+        self.assertIn("<posting>", posting_block["text"])
+        self.assertNotIn("cache_control", posting_block)
 
     @unittest.skipUnless(importlib.util.find_spec("anthropic"), "anthropic not installed")
     def test_anthropic_refusal_and_errors(self):
