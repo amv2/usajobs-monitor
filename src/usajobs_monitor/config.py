@@ -15,6 +15,7 @@ import datetime
 import json
 import os
 import re
+import shlex
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping
@@ -537,8 +538,10 @@ def ai_provider_allowance(ai: Mapping[str, Any]) -> str:
     if provider == "anthropic":
         return ""
     if provider == "command":
-        command = ai.get("command") or []
-        return str(command[0]) if command else "command"
+        # The whole command line, not just the program: allowing "python3" for one
+        # setup must not let another profile run "python3 -c ...".
+        command = [str(part) for part in ai.get("command") or []]
+        return shlex.join(command) if command else "command"
     return provider
 
 
@@ -546,15 +549,17 @@ def ai_provider_allowed(ai: Mapping[str, Any], env: Mapping[str, str]) -> bool:
     needed = ai_provider_allowance(ai)
     if not needed:
         return True
-    allowed = {item.strip() for item in str(env.get(AI_ALLOW_ENV) or "").split(",")}
-    return needed in allowed
+    value = str(env.get(AI_ALLOW_ENV) or "").strip()
+    # One exact value, or several separated by commas. The whole value is checked
+    # first so a single command line that contains a comma still works.
+    return needed == value or needed in {item.strip() for item in value.split(",")}
 
 
 def ai_provider_hint(ai: Mapping[str, Any]) -> str:
     needed = ai_provider_allowance(ai)
     what = f"run {needed}" if ai.get("provider") == "command" else f"import and call {needed}"
     return (f"ai.provider would {what}. A profile can't do that by itself: if you trust it, set "
-            f"{AI_ALLOW_ENV}={needed} in the environment (comma-separate several)")
+            f"{AI_ALLOW_ENV}={shlex.quote(needed)} in the environment (comma-separate several)")
 
 
 def resolve_credentials(config: dict[str, Any], env: Mapping[str, str] | None = None) -> list[str]:

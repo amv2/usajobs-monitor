@@ -4,6 +4,7 @@ from datetime import date
 import importlib.util
 import json
 import os
+import shlex
 import subprocess
 from pathlib import Path
 import sys
@@ -245,8 +246,9 @@ class ProviderTests(unittest.TestCase):
 
     def test_command_provider_round_trip(self):
         script = "import sys, json; sys.stdin.read(); print(json.dumps(%r))" % (GOOD_ANSWER,)
-        provider = fit.make_provider({**self.AI, "provider": "command", "command": [sys.executable, "-c", script]},
-                                     env={"USAJOBS_ALLOW_AI_PROVIDER": sys.executable})
+        command = [sys.executable, "-c", script]
+        provider = fit.make_provider({**self.AI, "provider": "command", "command": command},
+                                     env={"USAJOBS_ALLOW_AI_PROVIDER": shlex.join(command)})
         self.assertEqual(fit.parse_fit(provider.complete("system", "prompt"))["fit"], "possible")
 
     def test_command_provider_failures_are_fixed_text(self):
@@ -272,11 +274,13 @@ class ProviderTests(unittest.TestCase):
     def test_profile_alone_cannot_run_code(self):
         module = type(sys)("fake_llm")
         module.make = mock.Mock(return_value=FakeProvider())
-        cases = [({**self.AI, "provider": "command", "command": [sys.executable, "-c", "pass"]}, sys.executable),
+        cases = [({**self.AI, "provider": "command", "command": [sys.executable, "-c", "pass"]},
+                  shlex.quote(shlex.join([sys.executable, "-c", "pass"]))),
                  ({**self.AI, "provider": "fake_llm:make"}, "fake_llm:make")]
         with mock.patch.dict(sys.modules, {"fake_llm": module}), mock.patch.object(fit.subprocess, "run") as run:
             for ai, needed in cases:
-                for env in ({}, {"USAJOBS_ALLOW_AI_PROVIDER": "command"}, {"USAJOBS_ALLOW_AI_PROVIDER": "fake_llm"}):
+                for env in ({}, {"USAJOBS_ALLOW_AI_PROVIDER": "command"}, {"USAJOBS_ALLOW_AI_PROVIDER": "fake_llm"},
+                            {"USAJOBS_ALLOW_AI_PROVIDER": sys.executable}):
                     with self.assertRaises(FitError) as caught:
                         fit.make_provider(ai, env=env).complete("s", "p")
                     self.assertTrue(caught.exception.fatal)
@@ -289,10 +293,24 @@ class ProviderTests(unittest.TestCase):
         with mock.patch.dict(os.environ, {}, clear=False):
             os.environ.pop("USAJOBS_ALLOW_AI_PROVIDER", None)
             _, warnings = validate_config(raw)
-            self.assertTrue(any("USAJOBS_ALLOW_AI_PROVIDER=ollama" in w for w in warnings), warnings)
-        with mock.patch.dict(os.environ, {"USAJOBS_ALLOW_AI_PROVIDER": "ollama"}):
+            self.assertTrue(any("USAJOBS_ALLOW_AI_PROVIDER='ollama run x'" in w for w in warnings), warnings)
+        with mock.patch.dict(os.environ, {"USAJOBS_ALLOW_AI_PROVIDER": "ollama run x"}):
             _, warnings = validate_config(raw)
             self.assertFalse(any("USAJOBS_ALLOW_AI_PROVIDER" in w for w in warnings), warnings)
+
+    def test_allowing_an_interpreter_does_not_allow_other_scripts(self):
+        mine = {**self.AI, "provider": "command", "command": ["python3", "my_model.py"]}
+        theirs = {**self.AI, "provider": "command", "command": ["python3", "-c", "import os"]}
+        env = {"USAJOBS_ALLOW_AI_PROVIDER": "python3 my_model.py, ollama run llama3.1"}
+        self.assertIsInstance(fit.make_provider(mine, env=env), fit.CommandProvider)
+        for allowed in ("python3", "python3 my_model.py"):
+            with self.assertRaises(FitError):
+                fit.make_provider(theirs, env={"USAJOBS_ALLOW_AI_PROVIDER": allowed})
+
+    def test_single_command_with_a_comma_can_be_allowed(self):
+        ai = {**self.AI, "provider": "command", "command": ["runner", "--models=a,b"]}
+        self.assertIsInstance(fit.make_provider(ai, env={"USAJOBS_ALLOW_AI_PROVIDER": "runner --models=a,b"}),
+                              fit.CommandProvider)
 
     @unittest.skipUnless(importlib.util.find_spec("anthropic"), "anthropic not installed")
     def test_anthropic_request_shape(self):
