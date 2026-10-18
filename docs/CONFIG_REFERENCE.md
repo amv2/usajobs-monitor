@@ -62,6 +62,8 @@ Relative paths resolve against the config file's folder, not the current directo
 | `target_job_series` | `[]` | Occupational series (4 digits, as strings) that mark a relevant role. |
 | `target_agencies` | `[]` | Agencies to rank higher. Not a filter, and not a role signal on its own. |
 
+Keywords, title terms and the exclusion phrases in `[filters]` match whole words, ignoring case and spacing: `finance` matches "Finance Officer" but not "Refinance", and a plural *s* is fine. End a term with `*` to match any ending (`financ*` matches finance and financial).
+
 A posting with no title term, no target series and no target keyword fails with "no target role signal" (hard no).
 
 ## `[target]`
@@ -98,7 +100,7 @@ Rates are base × (1 + locality %), rounded to the nearest dollar, capped at Exe
 
 | Key | Default | Meaning |
 |---|---|---|
-| `salary_upper_must_exceed` | `0` | A match's posted *upper* salary must be above this. The GS pay cap (197,200 in 2026) shows only roles paying above GS-15. |
+| `salary_upper_must_exceed` | `0` | A match's posted *upper* salary must be above this. The GS pay cap (197,200 in 2026) shows only roles paying above GS-15. Hourly, biweekly and other rates are converted to annual pay first (2,087 hours a year). A posting with no salary listed fails this rule as "salary not posted", so it can still be a near miss or on the watch list; with `0` it passes. |
 | `near_miss_upper_salary_must_exceed` | `0` | Near misses must top out above this. `0` turns the floor off. |
 | `near_miss_min_gs_grade` | none | For GS-scale postings (GS, GG, GM, GL), the top grade must reach this for a near miss. Other pay plans are judged by pay alone. |
 | `min_gs_grade` | none | For GS-scale postings, the top grade must reach this for a match. A posting below it fails the pay rule ("top grade GS-14 is below GS-15"), so it can still be a near miss or on the watch list. Other pay plans are judged by `salary_upper_must_exceed` alone. |
@@ -128,7 +130,7 @@ Temporary appointments and eligibility gaps are failures but **not** hard no, so
 | `presets` | `[]` | Applicant types, below. They fill in the other keys; any key you set yourself wins, and their hiring paths are added to yours. |
 | `service` | `"none"` | `competitive`, `excepted`, or `none` (not a federal employee). Excepted-service employees qualify for postings open to "fed-excepted". |
 | `has_competitive_status` | `false` | Qualifies you for "fed-competitive" (merit promotion) postings. |
-| `interchange_agency` | `""` | Set if your excepted-service agency has an OPM interchange agreement. Then postings that explicitly invite interchange applicants, or advertise special authorities, count as eligible unless the text denies interchange. |
+| `interchange_agency` | `""` | Set if your excepted-service agency has an OPM interchange agreement. Then postings that explicitly invite interchange applicants, or advertise special authorities, count as eligible unless the text denies interchange. A special-authorities badge alone also covers Schedule A, VRA and other authorities, so those matches carry a **VERIFY ELIGIBILITY** flag: check that the announcement accepts interchange candidates before applying. |
 | `additional_hiring_paths` | `[]` | USAJOBS hiring-path codes you qualify for: `vet`, `mspouse`, `student`, `graduates`, `disability`, `fed-transition`, `nguard`, `native`, `overseas`, `peace`, `land` (the [USAJOBS code list](https://developer.usajobs.gov/General/Hiring-Paths)). Other values get a warning, since they never match. |
 
 Postings open to the public always pass.
@@ -218,7 +220,7 @@ Off unless you set `fit_notes = true` or run `usajobs-monitor fit`. Needs `pip i
 | `fit_notes` | `false` | Write `usajobs_fit_notes.md` with each run. |
 | `send_resume` | `false` | Must be `true` before your resume text goes to the provider. Without it, runs skip fit notes and `fit` only previews. |
 | `resume` | `""` | Your resume: `.md`, `.txt`, `.docx` or `.pdf` (relative paths are from this file). Empty uses the only resume in `paths.resume_folder`. |
-| `provider` | `"anthropic"` | `"anthropic"` (Claude API), `"command"` (a local program), or `"package.module:factory"` for your own provider. |
+| `provider` | `"anthropic"` | `"anthropic"` (Claude API), `"command"` (a local program), or `"package.module:factory"` for your own provider. The last two run code, so they also need `USAJOBS_ALLOW_AI_PROVIDER` in the environment set to the program (`command[0]`) or the factory path; a profile alone can't turn them on. |
 | `model` | `"claude-opus-5-5"` | Claude model for the `anthropic` provider. |
 | `effort` | `"medium"` | `low`, `medium`, `high`, `xhigh` or `max`. Higher is more thorough and costs more. |
 | `api_key_env` | `"ANTHROPIC_API_KEY"` | The variable (or keychain entry) holding the API key. A key in the file is an error. |

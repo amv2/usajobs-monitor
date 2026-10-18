@@ -12,7 +12,7 @@ from typing import Any
 
 from .jobs import GS_SCALE_PAY_PLANS, close_date, grade_numbers, job_id, job_pay_plans, job_url, salary_upper
 from .reasons import Code, code_of, is_hard_no
-from .review import ReviewResult
+from .review import VERIFY_ELIGIBILITY_FLAG, ReviewResult, needs_eligibility_check
 
 HISTORY_NAME = "usajobs_job_history.json"
 DECISION_STATUSES = {"applied", "not_interested", "watching"}
@@ -40,12 +40,14 @@ def near_miss_reason_text(result: ReviewResult) -> str:
 
 def clears_near_miss_floor(job: dict[str, Any], pay_floor: float, min_gs_grade: int | None) -> bool:
     """GS-scale postings must reach ``min_gs_grade`` when it is set (special rates can
-    push a lower grade past the pay floor); other pay systems are judged by upper pay alone."""
+    push a lower grade past the pay floor); other pay systems are judged by upper pay alone. Unposted pay passes: the posting
+    is already excluded for it, and a near miss is where a reader can check it."""
     if min_gs_grade and {plan.upper() for plan in job_pay_plans(job)} & GS_SCALE_PAY_PLANS:
         numbers = grade_numbers(job)
         if numbers and max(numbers) < int(min_gs_grade):
             return False
-    return pay_floor <= 0 or salary_upper(job) > pay_floor
+    upper = salary_upper(job)
+    return pay_floor <= 0 or upper is None or upper > pay_floor
 
 
 def watch_list_label(config: dict[str, Any]) -> str:
@@ -144,14 +146,35 @@ def save_decision(path: Path, number: str, status: str, note: str = "", title: s
     return previous
 
 
-def load_history(path: Path) -> dict[str, Any] | None:
+UNREADABLE_SUFFIX = ".unreadable"
+
+
+def read_history(path: Path) -> tuple[dict[str, Any] | None, str]:
+    """``(history, state)`` where state is "found", "missing" or "unreadable".
+
+    A missing file is a normal first run (or an evicted Actions cache). An unreadable
+    one is not, so runs say so instead of quietly starting over."""
+    if not path.exists():
+        return None, "missing"
     try:
         history = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return None
+        return None, "unreadable"
     if not isinstance(history, dict) or not isinstance(history.get("jobs"), dict):
-        return None
-    return history
+        return None, "unreadable"
+    return history, "found"
+
+
+def load_history(path: Path) -> dict[str, Any] | None:
+    return read_history(path)[0]
+
+
+def baseline_text(state: str, history_name: str = HISTORY_NAME) -> str:
+    """Why a run is a baseline, for reports and the digest."""
+    if state == "unreadable":
+        return (f"the earlier history file couldn't be read, so this run starts over and nothing is flagged NEW "
+                f"(the unreadable copy is kept as {history_name}{UNREADABLE_SUFFIX})")
+    return "there is no earlier history yet, so nothing is flagged NEW"
 
 
 @dataclass
@@ -165,6 +188,7 @@ class RunView:
     decisions: dict[str, dict[str, str]]
     baseline: bool
     history: dict[str, Any]
+    history_state: str = "missing"
 
     def flag_text(self, result: ReviewResult) -> str:
         return ", ".join(self.flags.get(job_id(result.job), []))
@@ -210,6 +234,8 @@ def build_view(results: list[ReviewResult], config: dict[str, Any], history: dic
         tags = []
         if not baseline and number not in previous:
             tags.append("NEW")
+        if r.kept and needs_eligibility_check(r):
+            tags.append(VERIFY_ELIGIBILITY_FLAG)
         closes = close_date(r.job)
         if closes is not None and 0 <= (closes - today).days <= CLOSING_SOON_DAYS:
             tags.append("CLOSING SOON")

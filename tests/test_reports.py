@@ -121,6 +121,19 @@ class EndToEndTests(unittest.TestCase):
             summary = json.loads((reports / runner.SUMMARY).read_text())
             self.assertEqual((code, summary["history_baseline"], summary["new_since_last_run"]["matches"]),
                              (0, False, 0))
+            self.assertEqual(summary["history_status"], "found")
+
+            # A corrupt history file is reported and kept aside, not silently replaced.
+            (reports / runner.HISTORY).write_text("{not json", encoding="utf-8")
+            with mock.patch.object(api, "fetch_usajobs", return_value=page):
+                code, _ = runner.run(settings)
+            summary = json.loads((reports / runner.SUMMARY).read_text())
+            self.assertEqual((code, summary["history_baseline"], summary["history_status"]), (0, True, "unreadable"))
+            self.assertTrue(any("could not be read" in w for w in summary["search_warnings"]))
+            self.assertEqual((reports / (runner.HISTORY + ".unreadable")).read_text(), "{not json")
+            self.assertIn('"jobs"', (reports / runner.HISTORY).read_text())
+            with zipfile.ZipFile(reports / "usajobs_briefing.docx") as docx:
+                self.assertIn("couldn", docx.read("word/document.xml").decode())
 
 
 class ReasonTests(unittest.TestCase):

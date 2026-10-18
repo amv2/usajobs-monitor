@@ -42,7 +42,8 @@ from .reports import (
     write_word,
 )
 from .review import review_job, target_agency_hit
-from .tracking import HISTORY_NAME, build_view, load_decisions, load_history, watch_list_label
+from .tracking import (HISTORY_NAME, UNREADABLE_SUFFIX, baseline_text, build_view, load_decisions, read_history,
+                       watch_list_label)
 
 SUMMARY = SUMMARY_NAME
 HISTORY = HISTORY_NAME
@@ -104,9 +105,14 @@ def run_search(settings: Settings, output_dir: Path, *, today: date | None = Non
     jobs, calls, search_warnings = api.search_all_jobs(config)
     results = [review_job(job, config) for job in jobs]
     decisions, decision_warnings = load_decisions(settings.decisions_path)
-    history = load_history(settings.history_path)
+    history, history_state = read_history(settings.history_path)
     view = build_view(results, config, history, decisions, today or date.today(),
                       started_at.isoformat(timespec="seconds"))
+    view.history_state = history_state
+    if history_state == "unreadable":
+        decision_warnings.append(f"Job history: {settings.history_path.name} could not be read. This run is a new "
+                                 f"baseline; the file is kept as {settings.history_path.name}{UNREADABLE_SUFFIX} "
+                                 "when this run publishes.")
     files = report_files(config)
     word, excel = output_dir / WORD_NAME, output_dir / EXCEL_NAME
     if WORD_NAME in files:
@@ -140,6 +146,7 @@ def run_search(settings: Settings, output_dir: Path, *, today: date | None = Non
         "search_warnings": search_warnings + decision_warnings + fit_warnings,
         "fit_notes": fit_notes,
         "history_baseline": view.baseline,
+        "history_status": history_state,
         "new_since_last_run": {
             "matches": view.new_count(view.matches),
             "watch_list": view.new_count(view.watch),
@@ -259,7 +266,10 @@ def publish_latest(run_dir: Path, reports: Path, summary: dict) -> None:
     # Job history drives NEW/dropped flags; it advances only with a validated run.
     history = run_dir / HISTORY
     if history.is_file() and not history.is_symlink():
-        atomic_write(reports / HISTORY, history.read_bytes())
+        published = reports / HISTORY
+        if summary.get("history_status") == "unreadable" and published.is_file() and not published.is_symlink():
+            atomic_write(reports / (HISTORY + UNREADABLE_SUFFIX), published.read_bytes())
+        atomic_write(published, history.read_bytes())
     # Fit notes (optional AI add-on) and their cache advance the same way.
     from .fit import FIT_CACHE_NAME, FIT_NOTES_NAME
     for name in (FIT_NOTES_NAME, FIT_CACHE_NAME):

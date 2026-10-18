@@ -128,6 +128,21 @@ class EligibilityTests(unittest.TestCase):
         self.assertIn("potential Example Regulatory Commission interchange route", basis)
         self.assertFalse(reason)
 
+    def test_special_authority_match_is_flagged_for_verification(self):
+        from datetime import date
+        from usajobs_monitor.tracking import build_view
+        config = {"eligibility": self.profile,
+                  "filters": {"salary_upper_must_exceed": 180000, "current_agency_terms": self.terms,
+                              "temporary_terms": [], "senior_executive_terms": [], "mismatch_terms": []},
+                  "search": {"target_role_keywords": ["financial"], "target_agencies": []}}
+        special = review_job({**self.job(["special-authorities"]), "PositionID": "1"}, config)
+        public = review_job({**self.job(["public"]), "PositionID": "2"}, config)
+        self.assertTrue(special.kept and public.kept)
+        self.assertIn("Schedule A", special.eligibility_basis)
+        view = build_view([special, public], config, None, {}, date(2026, 10, 17), "run")
+        self.assertIn("VERIFY ELIGIBILITY", view.flags["1"])
+        self.assertNotIn("VERIFY ELIGIBILITY", view.flags["2"])
+
     def test_other_eligibilities_not_assumed(self):
         for path in ["vet", "disability", "mspouse", "land", "peace", "fed-transition", "future-path"]:
             with self.subTest(path=path):

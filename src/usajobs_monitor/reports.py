@@ -26,7 +26,7 @@ from .config import target_label
 from .presets import preset_labels
 from .reasons import code_of
 from .review import SENIOR_EXECUTIVE_PAY_PLANS, ReviewResult, applicant_label, target_agency_hit
-from .tracking import CLOSING_SOON_DAYS, RunView, near_miss_reason_text, watch_list_label
+from .tracking import CLOSING_SOON_DAYS, RunView, baseline_text, near_miss_reason_text, watch_list_label
 
 WORD_NAME = "usajobs_briefing.docx"
 EXCEL_NAME = "usajobs_tracker.xlsx"
@@ -207,7 +207,7 @@ def write_word(path: Path, results: list[ReviewResult], config: dict[str, Any], 
     summary.add_run(f"\nTarget-agency matches: {len(target_agencies)}")
     summary.add_run(f"\n{watch_label}: {len(view.watch)}")
     if view.baseline:
-        summary.add_run("\nNew since last run: baseline run (no earlier history), so nothing is flagged NEW")
+        summary.add_run(f"\nNew since last run: baseline run; {baseline_text(view.history_state)}")
     else:
         summary.add_run(f"\nNew since last run: {view.new_count(view.matches)} matches, "
                         f"{view.new_count(view.watch)} watch list, {view.new_count(view.near)} near misses")
@@ -338,7 +338,7 @@ def write_excel(path: Path, results: list[ReviewResult], config: dict[str, Any],
         ("Matches after final filters", len(view.matches)),
         (watch_list_label(config), len(view.watch)),
         ("Near misses reported", len(view.near)),
-        ("New since last run", "baseline run" if view.baseline else
+        ("New since last run", f"baseline run; {baseline_text(view.history_state)}" if view.baseline else
          f"{view.new_count(view.matches)} matches, {view.new_count(view.watch)} watch list, {view.new_count(view.near)} near misses"),
         ("Dropped since last run", len(view.dropped)),
         ("Hidden as not interested", len(view.hidden)),
@@ -486,8 +486,7 @@ def write_html(path: Path, results: list[ReviewResult], config: dict[str, Any], 
             + "".join(f'<span style="{HTML_STYLE["stat"]}"><b>{n}</b> {esc(label)}</span>' for label, n in stats)
             + "</div>"]
     if view.baseline:
-        body.append(f'<p style="{HTML_STYLE["muted"]}">Baseline run: there is no earlier history, '
-                    "so nothing is flagged NEW.</p>")
+        body.append(f'<p style="{HTML_STYLE["muted"]}">Baseline run: {esc(baseline_text(view.history_state))}.</p>')
     else:
         body.append(f'<p style="{HTML_STYLE["muted"]}">New since last run: {view.new_count(view.matches)} matches, '
                     f"{view.new_count(view.watch)} watch list, {view.new_count(view.near)} near misses. "

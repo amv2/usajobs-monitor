@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 import re
 from dataclasses import dataclass, field
 from typing import Any
@@ -46,14 +47,32 @@ class ReviewResult:
     score_parts: list[tuple[str, float]] = field(default_factory=list)
 
 
+@functools.lru_cache(maxsize=1024)
+def term_pattern(term: str) -> re.Pattern[str] | None:
+    """Whole words, so "ses" doesn't match "processes" and "finance" doesn't match
+    "refinance". A plural "s" still matches, and a trailing "*" matches any ending
+    ("financ*" matches "finance" and "financial")."""
+    term = re.sub(r"\s+", " ", str(term or "").strip().lower())
+    prefix = term.endswith("*")
+    term = term.rstrip("*").strip()
+    if not term:
+        return None
+    ending = r"[a-z0-9]*" if prefix else r"(?:s|es)?(?![a-z0-9])"
+    body = re.escape(term).replace(r"\ ", r"\s+")
+    return re.compile(r"(?<![a-z0-9])" + body + ending)
+
+
+def contains_term(text: str, term: str) -> bool:
+    pattern = term_pattern(term)
+    return bool(pattern and pattern.search(text.lower()))
+
+
 def contains_any(text: str, terms: list[str]) -> bool:
-    lower = text.lower()
-    return any(term.lower() in lower for term in terms)
+    return any(contains_term(text, term) for term in terms)
 
 
 def keyword_score(text: str, keywords: list[str]) -> int:
-    lower = text.lower()
-    return sum(1 for keyword in keywords if keyword.lower() in lower)
+    return sum(1 for keyword in keywords if contains_term(text, keyword))
 
 
 def text_values(value: Any) -> set[str]:
@@ -146,6 +165,16 @@ def applicant_label(config: dict[str, Any]) -> str:
     return f"{agency} {service_text} profile" if agency else f"{service_text} profile"
 
 
+# A special-authorities badge is weak evidence of an interchange route, so these
+# matches carry a VERIFY ELIGIBILITY flag instead of reading as a confirmed fit.
+SPECIAL_AUTHORITIES_BASIS = "Special authorities advertised"
+VERIFY_ELIGIBILITY_FLAG = "VERIFY ELIGIBILITY"
+
+
+def needs_eligibility_check(result: "ReviewResult") -> bool:
+    return result.eligibility_basis.startswith(SPECIAL_AUTHORITIES_BASIS)
+
+
 INTERCHANGE_DENIAL = re.compile(
     r"interchange.{0,100}\b(?:not accepted|not eligible|not considered|ineligible|excluded)\b"
     r"|(?:do not|does not|will not|cannot) (?:accept|consider).{0,80}interchange"
@@ -196,8 +225,9 @@ def eligibility_screen(job: dict[str, Any], config: dict[str, Any]) -> tuple[str
         if interchange_basis and not interchange_denied:
             return interchange_basis, None
         if "special-authorities" in paths and not interchange_denied:
-            return (f"Special authorities advertised; potential {interchange_agency} interchange route, "
-                    "subject to announcement-specific coverage and SF-50 requirements"), None
+            return (f"{SPECIAL_AUTHORITIES_BASIS}; potential {interchange_agency} interchange route. The badge also "
+                    "covers Schedule A, VRA and other authorities, so confirm the announcement accepts interchange "
+                    "candidates and check SF-50 requirements"), None
 
     other_paths = paths & text_values(profile.get("additional_hiring_paths"))
     if other_paths:
@@ -266,6 +296,23 @@ def gs_grade_reason(job: dict[str, Any], min_grade: int | None) -> Reason | None
     return Reason(Code.SALARY, f"top grade {plans[0]}-{max(numbers)} is below {plans[0]}-{int(min_grade)}")
 
 
+def pay_reason(job: dict[str, Any], filters: dict[str, Any]) -> Reason | None:
+    """One salary-rule reason, or None. A posting with no pay listed is not "$0": with no
+    floor it passes, and with a floor it fails only as unconfirmed, so it can still be a
+    near miss or watch-list entry. The GS grade rule applies either way."""
+    upper = salary_upper(job)
+    salary_floor = float(filters.get("salary_upper_must_exceed") or 0)
+    if upper is not None and salary_floor > 0 and upper <= salary_floor:
+        return Reason(Code.SALARY, f"posted upper salary ${upper:,.0f} does not exceed ${salary_floor:,.0f}")
+    grade_reason = gs_grade_reason(job, filters.get("min_gs_grade"))
+    if grade_reason:
+        return grade_reason
+    if upper is None and salary_floor > 0:
+        return Reason(Code.SALARY, f"salary not posted, so it can't be confirmed above ${salary_floor:,.0f}; "
+                                   "check the announcement")
+    return None
+
+
 def review_job(job: dict[str, Any], config: dict[str, Any]) -> ReviewResult:
     filters = config["filters"]
     search = config["search"]
@@ -273,14 +320,9 @@ def review_job(job: dict[str, Any], config: dict[str, Any]) -> ReviewResult:
     text = collect_text(job)
     reasons: list[Reason] = []
 
-    upper = salary_upper(job)
-    salary_floor = float(filters.get("salary_upper_must_exceed") or 0)
-    if upper <= salary_floor:
-        reasons.append(Reason(Code.SALARY, f"posted upper salary ${upper:,.0f} does not exceed ${salary_floor:,.0f}"))
-    else:
-        grade_reason = gs_grade_reason(job, filters.get("min_gs_grade"))
-        if grade_reason:
-            reasons.append(grade_reason)
+    salary_reason = pay_reason(job, filters)
+    if salary_reason:
+        reasons.append(salary_reason)
 
     eligibility_basis, eligibility_reason = eligibility_screen(job, config)
     internal_other = not eligibility_basis and is_internal_other_agency(job, current_agency_terms(config))
@@ -336,7 +378,12 @@ def review_job(job: dict[str, Any], config: dict[str, Any]) -> ReviewResult:
     if target_agency_hit(job, search.get("target_agencies", [])):
         parts.append(("target agency", weights["target_agency"]))
     # Pay level ranks senior postings above junior ones among near misses and the watch list.
-    if upper > salary_floor:
+    # Unposted pay earns nothing here.
+    upper = salary_upper(job)
+    salary_floor = float(filters.get("salary_upper_must_exceed") or 0)
+    if upper is None:
+        pass
+    elif upper > salary_floor:
         parts.append(("upper pay above the salary rule", weights["above_salary_rule"]))
     elif upper >= weights["pay_tier_high"]:
         parts.append(("upper pay in the high tier", weights["pay_high"]))

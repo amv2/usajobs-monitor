@@ -7,7 +7,9 @@ import time
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
-from urllib.request import Request, urlopen
+from urllib.request import Request
+
+from . import net
 
 USAJOBS_SEARCH_URL = "https://data.usajobs.gov/api/search"
 RESULTS_PER_PAGE = 500  # USAJOBS Search API maximum
@@ -16,6 +18,11 @@ REQUEST_TIMEOUT = 45
 MAX_ATTEMPTS = 4
 BACKOFF_SECONDS = 2.0
 MAX_RETRY_AFTER = 60.0
+
+
+def urlopen(request: Request, timeout: float):
+    """No redirects: urllib would forward the Authorization-Key header to the new location."""
+    return net.open_url(request, timeout)
 
 
 def _retryable(exc: Exception) -> bool:

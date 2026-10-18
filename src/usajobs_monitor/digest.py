@@ -20,7 +20,7 @@ from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
 from .reports import CSV_NAME, EXCEL_NAME, HTML_NAME, HTML_STYLE, REPORT_LABELS, WORD_NAME
-from .tracking import CLOSING_SOON_DAYS
+from .tracking import CLOSING_SOON_DAYS, baseline_text
 
 # File name -> (MIME type, the ZIP member an Office file must contain, or "").
 ATTACHMENT_TYPES = {
@@ -152,7 +152,8 @@ def build_digest(manifest: dict, summary: dict, finished: datetime, *, max_items
             + f"Near misses reported: {summary['near_misses_reported']}.",
         ]
         if summary.get("history_baseline") is True:
-            paragraphs.append("New since last run: this is the baseline run, so nothing is flagged NEW yet.")
+            paragraphs.append(f"New since last run: this is a baseline run; "
+                              f"{baseline_text(str(summary.get('history_status') or 'missing'))}.")
         elif new:
             dropped = summary.get("dropped_since_last_run")
             paragraphs.append(

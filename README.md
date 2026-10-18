@@ -400,7 +400,9 @@ No computer to leave on? GitHub can run the monitor on its own servers. The repo
 
 **Use a private copy.** Your profile describes your eligibility and possibly your current agency, and your decisions file and reports describe your job search. Anything in a public repository is public. The workflow won't run in a public repository at all, so forking this repo (forks of a public repo stay public) isn't enough.
 
-1. **Make a private copy.** On GitHub, create a new **private** repository with no README, then push this code to it:
+1. **Make a private copy.** The easiest way: on this repository's GitHub page, choose **Use this template → Create a new repository**, pick **Private**, and create it. That copies the code, including the workflow, into a private repository of your own with a fresh history.
+
+   Or create a new **private** repository with no README and push this code to it:
 
    ```bash
    git clone https://github.com/amv2/usajobs-monitor.git my-usajobs
@@ -428,7 +430,7 @@ No computer to leave on? GitHub can run the monitor on its own servers. The repo
 After that it runs on its own. Good to know:
 
 - **Schedule.** The default is 12:00 UTC on Monday, Wednesday and Friday, which is 7 AM Eastern in winter and 8 AM in summer. GitHub schedules are always in UTC; change the `cron:` line in the workflow file to pick other days or times. Scheduled runs can start several minutes late, and GitHub runs schedules only from the default branch.
-- **Seen jobs are kept in the Actions cache.** Each run restores the previous run's job history, so NEW and dropped flags work as they do on your own computer, and saves the updated history for the next run. GitHub deletes a cache nobody has used for 7 days, so after a longer gap the next run treats every job as NEW. Nothing is committed back to your repository.
+- **Seen jobs are kept in the Actions cache.** Each run restores the previous run's job history, so NEW and dropped flags work as they do on your own computer, and saves the updated history for the next run. GitHub deletes a cache nobody has used for 7 days, so after a longer gap the next run starts a new baseline: the report says there's no earlier history, and nothing is flagged NEW until the run after it. Nothing is committed back to your repository.
 - **Reports are kept as run artifacts** for 30 days. Set a repository variable `USAJOBS_REPORT_DAYS` to change that (GitHub's limit is 90 days for private repositories).
 - **Decisions.** Edit `search/job_decisions.csv` in the repository (GitHub's web editor is fine) and the next run picks it up.
 - **Failures.** A run that fails to search or deliver fails the workflow, and GitHub emails you about failed runs by default. Re-running a failed workflow searches again rather than resending the old run.
@@ -472,6 +474,8 @@ usajobs-monitor fit 812345600             # sends it and prints the note
 **Privacy.** Your resume is read on your computer. It goes to the provider only when `ai.send_resume = true`, and only with postings from your own search. With the default provider that's Anthropic's API, under your API account's [data terms](https://www.anthropic.com/legal/commercial-terms). The posting and resume are passed to the model as data with instructions to ignore any instructions inside them. Fit notes are written by a model, so read the announcement before you rely on them.
 
 **Other models.** Set `ai.provider = "command"` and `ai.command = ["ollama", "run", "llama3.1"]` (or any program) to keep everything on your computer: the prompt goes to the program's standard input, and it must print the JSON answer. You can also point `ai.provider` at your own Python factory, `"my_package.my_module:make_provider"`; see [`fit.py`](src/usajobs_monitor/fit.py) for the interface.
+
+**A profile can't run code by itself.** Both of those run code on your computer, so a profile that names one is refused until you also allow it outside the file, in the environment: `export USAJOBS_ALLOW_AI_PROVIDER=ollama` (the exact `ai.command[0]`, or the exact factory path; comma-separate several). `check-config` tells you the value to set. This way a profile someone shares with you can't start a program or import code just because you ran it. Read any shared profile's `[ai]` table before you allow it.
 
 ### MCP server
 
@@ -576,11 +580,15 @@ Good habits:
 
 ## Contributing
 
-Issues and pull requests are welcome. Run the tests with:
+Issues and pull requests are welcome. Install the package first (the tests import it), then run them:
 
 ```bash
+python -m venv .venv && . .venv/bin/activate
+pip install -e ".[ai,mcp,keyring]"   # the extras are optional; tests that need them skip without them
 python -m unittest discover -s tests
 ```
+
+Without installing, `PYTHONPATH=src python -m unittest discover -s tests` works too. The [tests workflow](.github/workflows/tests.yml) runs the same suite on Python 3.11 to 3.14, on Linux and Windows, for every pull request.
 
 Please don't attach real configs, decisions files or reports to issues. Use the sample profile, or redact your copy first.
 

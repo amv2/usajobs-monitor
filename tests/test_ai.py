@@ -3,6 +3,7 @@
 from datetime import date
 import importlib.util
 import json
+import os
 import subprocess
 from pathlib import Path
 import sys
@@ -245,7 +246,7 @@ class ProviderTests(unittest.TestCase):
     def test_command_provider_round_trip(self):
         script = "import sys, json; sys.stdin.read(); print(json.dumps(%r))" % (GOOD_ANSWER,)
         provider = fit.make_provider({**self.AI, "provider": "command", "command": [sys.executable, "-c", script]},
-                                     env={})
+                                     env={"USAJOBS_ALLOW_AI_PROVIDER": sys.executable})
         self.assertEqual(fit.parse_fit(provider.complete("system", "prompt"))["fit"], "possible")
 
     def test_command_provider_failures_are_fixed_text(self):
@@ -261,10 +262,37 @@ class ProviderTests(unittest.TestCase):
         module = type(sys)("fake_llm")
         module.make = lambda ai, env: FakeProvider()
         with mock.patch.dict(sys.modules, {"fake_llm": module}):
-            provider = fit.make_provider({**self.AI, "provider": "fake_llm:make"}, env={})
+            provider = fit.make_provider({**self.AI, "provider": "fake_llm:make"},
+                                         env={"USAJOBS_ALLOW_AI_PROVIDER": "other:x, fake_llm:make"})
         self.assertIsInstance(provider, FakeProvider)
         with self.assertRaises(FitError):
-            fit.make_provider({**self.AI, "provider": "no_such_module_xyz:make"}, env={})
+            fit.make_provider({**self.AI, "provider": "no_such_module_xyz:make"},
+                              env={"USAJOBS_ALLOW_AI_PROVIDER": "no_such_module_xyz:make"})
+
+    def test_profile_alone_cannot_run_code(self):
+        module = type(sys)("fake_llm")
+        module.make = mock.Mock(return_value=FakeProvider())
+        cases = [({**self.AI, "provider": "command", "command": [sys.executable, "-c", "pass"]}, sys.executable),
+                 ({**self.AI, "provider": "fake_llm:make"}, "fake_llm:make")]
+        with mock.patch.dict(sys.modules, {"fake_llm": module}), mock.patch.object(fit.subprocess, "run") as run:
+            for ai, needed in cases:
+                for env in ({}, {"USAJOBS_ALLOW_AI_PROVIDER": "command"}, {"USAJOBS_ALLOW_AI_PROVIDER": "fake_llm"}):
+                    with self.assertRaises(FitError) as caught:
+                        fit.make_provider(ai, env=env).complete("s", "p")
+                    self.assertTrue(caught.exception.fatal)
+                    self.assertIn(f"USAJOBS_ALLOW_AI_PROVIDER={needed}", str(caught.exception))
+        module.make.assert_not_called()
+        run.assert_not_called()
+
+    def test_check_config_warns_about_code_providers(self):
+        raw = {**BASE, "ai": {"provider": "command", "command": ["ollama", "run", "x"]}}
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("USAJOBS_ALLOW_AI_PROVIDER", None)
+            _, warnings = validate_config(raw)
+            self.assertTrue(any("USAJOBS_ALLOW_AI_PROVIDER=ollama" in w for w in warnings), warnings)
+        with mock.patch.dict(os.environ, {"USAJOBS_ALLOW_AI_PROVIDER": "ollama"}):
+            _, warnings = validate_config(raw)
+            self.assertFalse(any("USAJOBS_ALLOW_AI_PROVIDER" in w for w in warnings), warnings)
 
     @unittest.skipUnless(importlib.util.find_spec("anthropic"), "anthropic not installed")
     def test_anthropic_request_shape(self):

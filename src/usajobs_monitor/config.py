@@ -13,6 +13,7 @@ from __future__ import annotations
 import copy
 import datetime
 import json
+import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -66,6 +67,9 @@ ENV_NAME = r"[A-Za-z_][A-Za-z0-9_]{0,99}"
 # The optional AI add-on ([ai]); see fit.py. Nothing here is used unless asked for.
 AI_PROVIDERS = ("anthropic", "command")
 AI_PROVIDER_PATH = r"[A-Za-z_][\w.]*:[A-Za-z_]\w*"  # or "package.module:factory"
+# A profile can't run a program or import code on its own: the person running it must
+# also name that program or factory here, outside the file. Shared profiles stay data.
+AI_ALLOW_ENV = "USAJOBS_ALLOW_AI_PROVIDER"
 AI_EFFORTS = ("low", "medium", "high", "xhigh", "max")
 AI_LISTS = ("matches", "watch_list", "near_misses")
 DEFAULT_AI_MODEL = "claude-opus-5-5"
@@ -519,9 +523,38 @@ def _check_ai(check: _Checker, config: dict[str, Any]) -> None:
         value = ai.get(key)
         if isinstance(value, int) and not isinstance(value, bool) and not low <= value <= high:
             check.error(f"ai.{key}", f"expected {low} to {high}")
+    if isinstance(provider, str) and provider != "anthropic" and not ai_provider_allowed(ai, os.environ):
+        check.warnings.append(ai_provider_hint(ai) + "; until then fit notes and fit are refused")
     if ai.get("fit_notes") is True and ai.get("send_resume") is not True:
         check.warnings.append("ai.fit_notes: needs ai.send_resume = true before your resume is sent to the "
                               "AI provider; runs skip fit notes until then")
+
+
+def ai_provider_allowance(ai: Mapping[str, Any]) -> str:
+    """The value ``USAJOBS_ALLOW_AI_PROVIDER`` must list before this provider runs, or ""
+    for the built-in ``anthropic`` provider, which runs no local code."""
+    provider = str(ai.get("provider") or "anthropic")
+    if provider == "anthropic":
+        return ""
+    if provider == "command":
+        command = ai.get("command") or []
+        return str(command[0]) if command else "command"
+    return provider
+
+
+def ai_provider_allowed(ai: Mapping[str, Any], env: Mapping[str, str]) -> bool:
+    needed = ai_provider_allowance(ai)
+    if not needed:
+        return True
+    allowed = {item.strip() for item in str(env.get(AI_ALLOW_ENV) or "").split(",")}
+    return needed in allowed
+
+
+def ai_provider_hint(ai: Mapping[str, Any]) -> str:
+    needed = ai_provider_allowance(ai)
+    what = f"run {needed}" if ai.get("provider") == "command" else f"import and call {needed}"
+    return (f"ai.provider would {what}. A profile can't do that by itself: if you trust it, set "
+            f"{AI_ALLOW_ENV}={needed} in the environment (comma-separate several)")
 
 
 def resolve_credentials(config: dict[str, Any], env: Mapping[str, str] | None = None) -> list[str]:

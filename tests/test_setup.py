@@ -124,7 +124,7 @@ class ProfileTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        self.home = Path(self.temp.name) / "home"
+        self.home = Path(self.temp.name).resolve() / "home"  # Windows temp paths can be 8.3 short names
         self.env = {profiles.HOME_VAR: str(self.home)}
         patch.dict(os.environ, {**self.env, "USAJOBS_KEYRING": "0"}).start()
         self.addCleanup(patch.stopall)
