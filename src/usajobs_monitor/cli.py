@@ -74,7 +74,7 @@ def _ai_status(settings) -> str:
         resume = ", ".join(path.name for path in find_resumes(settings.ai_resume, settings.resume_folder))
     except ResumeError as exc:
         resume = f"not found ({exc})"
-    provider = f"{ai['provider']} {ai['model']}" if ai["provider"] == "anthropic" else ai["provider"]
+    provider = f"{ai['provider']} {ai['model']}" if ai["model"] and ai["provider"] != "command" else ai["provider"]
     sending = "allowed" if ai["send_resume"] else "not allowed (set ai.send_resume = true)"
     line = f"AI fit notes: on ({provider}); resume: {resume}; sending it to the provider: {sending}"
     if ai["provider"] == "anthropic":

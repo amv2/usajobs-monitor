@@ -478,6 +478,58 @@ class ProviderTests(unittest.TestCase):
         self.assertIsInstance(fit.make_provider(ai, env={"USAJOBS_ALLOW_AI_PROVIDER": "runner --models=a,b"}),
                               fit.CommandProvider)
 
+    def test_presets_run_the_tool_with_tools_off(self):
+        claude = ["claude", "-p", "--safe-mode", "--tools", "", "--strict-mcp-config", "--disable-slash-commands",
+                  "--no-session-persistence"]
+        cases = {
+            ("claude-cli", ""): claude,
+            ("claude-cli", "opus"): [*claude, "--model=opus"],
+            ("codex-cli", "gpt-5"): ["codex", "exec", "--sandbox", "read-only", "--skip-git-repo-check",
+                                     "--model=gpt-5", "-"],
+            ("gemini-cli", ""): ["gemini", "--approval-mode", "plan", "-p", "Answer the request above."],
+            ("ollama", "llama3.1"): ["ollama", "run", "llama3.1", "--format", "json"],
+        }
+        for (name, model), command in cases.items():
+            provider = fit.make_provider({**self.AI, "provider": name, "model": model},
+                                         env={"USAJOBS_ALLOW_AI_PROVIDER": name})
+            self.assertEqual(provider.command, command)
+            self.assertEqual(fit.provider_label(provider, {}), f"{name} {model}".strip())
+
+    def test_presets_need_the_tool_name_allowed(self):
+        with mock.patch.object(fit.subprocess, "run") as run:
+            for env in ({}, {"USAJOBS_ALLOW_AI_PROVIDER": "claude"}, {"USAJOBS_ALLOW_AI_PROVIDER": "codex-cli"}):
+                with self.assertRaises(FitError) as caught:
+                    fit.make_provider({**self.AI, "provider": "claude-cli", "model": ""}, env=env)
+                self.assertIn("USAJOBS_ALLOW_AI_PROVIDER=claude-cli", str(caught.exception))
+        run.assert_not_called()
+
+    def test_preset_missing_program_says_how_to_fix(self):
+        provider = fit.make_provider({**self.AI, "provider": "gemini-cli", "model": ""},
+                                     env={"USAJOBS_ALLOW_AI_PROVIDER": "gemini-cli"})
+        with mock.patch.object(fit.subprocess, "run", side_effect=FileNotFoundError):
+            with self.assertRaises(FitError) as caught:
+                provider.complete("s", "p")
+        self.assertTrue(caught.exception.fatal)
+        self.assertIn("gemini program was not found", str(caught.exception))
+        self.assertIn("PATH", str(caught.exception))
+
+    def test_preset_config(self):
+        config, _ = validate_config({**BASE, "ai": {"provider": "claude-cli"}})
+        self.assertEqual(config["ai"]["model"], "")  # the CLI's own default model
+        config, _ = validate_config({**BASE, "ai": {}})
+        self.assertEqual(config["ai"]["model"], "claude-opus-5-5")
+        for ai, setting in (({"provider": "ollama"}, "ai.model"),
+                            ({"provider": "codex-cli", "model": "--dangerously-bypass-approvals-and-sandbox"},
+                             "ai.model"),
+                            ({"provider": "claude-cli", "command": ["claude", "-p"]}, "ai.command")):
+            with self.assertRaises(ConfigError) as caught:
+                validate_config({**BASE, "ai": ai})
+            self.assertIn(setting, str(caught.exception))
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("USAJOBS_ALLOW_AI_PROVIDER", None)
+            _, warnings = validate_config({**BASE, "ai": {"provider": "ollama", "model": "llama3.1"}})
+        self.assertTrue(any("USAJOBS_ALLOW_AI_PROVIDER=ollama" in w for w in warnings), warnings)
+
     @unittest.skipUnless(importlib.util.find_spec("anthropic"), "anthropic not installed")
     def test_anthropic_request_shape(self):
         provider = fit.make_provider(self.AI, env={"ANTHROPIC_API_KEY": "test-key"})

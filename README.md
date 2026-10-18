@@ -20,7 +20,7 @@ A scheduled job search for [USAJOBS](https://www.usajobs.gov) that does the filt
 - **Remembers between runs.** Each job is flagged **NEW** the first time it appears and **CLOSING SOON** when three days or less remain, and jobs that disappeared are noted. You can record a decision (applied, not interested, watching) so a job stops nagging you.
 - **Runs safely on a schedule.** Each run works in its own folder and publishes reports only after they pass validation. A lock stops two runs from overlapping, and a failed run never overwrites the last good report or puts raw errors in anything that gets sent to you.
 - **Delivers results where you'll see them.** Email through any SMTP server with the reports attached, or a short digest to Discord, Slack or ntfy. A retry never sends the same run twice.
-- **Optional AI help, off by default.** With the `ai` extra, each run can add short notes comparing your resume with each match (strengths, gaps, resume wording to fix), using the Claude API or a model you run yourself. With the `mcp` extra, an AI assistant such as Claude Desktop can search and screen postings through your profile. Nothing in the core needs either one, and your resume is sent only when you turn that on.
+- **Optional AI help, off by default.** Each run can add short notes comparing your resume with each match (strengths, gaps, resume wording to fix), using a subscription you already have through the Claude Code, Codex or Gemini command-line tools, a local model with Ollama, or an API key. [docs/AI.md](docs/AI.md) compares the options. With the `mcp` extra, an AI assistant such as Claude Desktop can search and screen postings through your profile. Nothing in the core needs either one, and your resume is sent only when you turn that on.
 - **Sets itself up.** `usajobs-monitor init` asks a few questions and writes your profile, with starting eligibility for your applicant type: current federal employee, excepted service, veteran, military spouse, student, recent graduate, former federal employee, Schedule A, or the general public.
 
 Output is your choice of an HTML digest (`usajobs_digest.html`), a CSV of every job reviewed (`usajobs_jobs.csv`), a Word briefing (`usajobs_briefing.docx`) and an Excel tracker (`usajobs_tracker.xlsx`), plus a `usajobs_last_run.json` summary. Profiles written by `init` use HTML and CSV; older profiles keep Word and Excel until you set [`report.formats`](docs/CONFIG_REFERENCE.md#report-and-scoring).
@@ -497,30 +497,43 @@ After that it runs on its own. Good to know:
 
 ## 8. Optional: AI fit notes and an MCP server
 
-Everything above works without AI. This section adds two optional pieces.
+Everything above works without AI. **[docs/AI.md](docs/AI.md) walks through every way to add it**, with what each needs:
+
+| Way | What you need | Profile setting |
+|---|---|---|
+| Claude app (chat with your search over MCP) | Claude subscription + desktop app or Claude Code | none; see [MCP server](#mcp-server) |
+| Claude Code CLI | Claude subscription + `claude` command | `provider = "claude-cli"` (runs it with every tool off) |
+| ChatGPT via OpenAI Codex CLI | ChatGPT plan + `codex` command | `provider = "codex-cli"` |
+| Gemini CLI | Google account + `gemini` command | `provider = "gemini-cli"` |
+| Local model (Ollama) | Ollama + a model; nothing leaves your computer | `provider = "ollama"`, `model = "llama3.1"` |
+| Claude API key (pay per use) | Key from the Claude Console | `provider = "anthropic"` (the default) |
+| OpenAI, Gemini or other API keys, or any program | That program | `provider = "command"` |
+
+The rest of this section covers the details for all of them.
 
 ### Resume fit notes
 
 For each match (and watch-list job, by default), a model reads the posting's qualifications, duties and specialized experience statement next to your resume and writes a short note: each required qualification marked met, unclear or missing with the resume evidence, a fit level (strong, possible, stretch or unlikely) that never runs ahead of that checklist, gaps, wording to change so an HR specialist gives you credit, and anything to confirm before applying. Notes land in `usajobs_fit_notes.md`, and the fit level also shows on each job in the reports and alerts.
 
 ```bash
-pip install -e ".[ai]"                       # Claude API client, plus PDF resume reading
-usajobs-monitor credentials set ANTHROPIC_API_KEY   # or export ANTHROPIC_API_KEY=...
+pip install -e ".[ai]"                       # PDF resume reading, plus the Claude API client
 ```
 
-Get an API key from the [Claude Console](https://platform.claude.com/). Then add to your profile:
+Then add to your profile, with the `provider` for the way you picked in [docs/AI.md](docs/AI.md):
 
 ```toml
 [ai]
+provider    = "claude-cli"  # or codex-cli, gemini-cli, ollama, anthropic (API key), command
 resume      = "resume.md"   # .md, .txt, .docx or .pdf, or a folder of versions; relative to this file
 send_resume = true          # required: without it your resume never leaves your computer
 fit_notes   = true          # add notes to every run
 # rank     = true                        # list stronger fits first (nothing is hidden)
 # lists    = ["matches", "watch_list"]   # also "near_misses"
 # max_jobs = 10                          # at most this many postings per run
-# model    = "claude-opus-5-5"
-# effort   = "medium"                    # low, medium, high, xhigh or max
+# model    = "opus"                      # optional; ollama needs one
 ```
+
+Every provider except `anthropic` runs a program on your computer, so you also allow it once outside the profile: `export USAJOBS_ALLOW_AI_PROVIDER=claude-cli` (put it in `~/.usajobs_env` for scheduled runs). With `anthropic`, store your key instead: `usajobs-monitor credentials set ANTHROPIC_API_KEY`.
 
 With `rank = true`, each list is sorted by fit level: strong, possible, then postings without a note, then stretch and unlikely. Nothing is dropped, so a wrong "unlikely" only moves a job down. The AI judges the minimum qualifications from your resume, not how the assessment questionnaire will place you.
 
@@ -533,23 +546,9 @@ usajobs-monitor fit 812345600 --preview   # prints the prompt and your resume te
 usajobs-monitor fit 812345600             # sends it and prints the note
 ```
 
-**Privacy.** Your resume is read on your computer. It goes to the provider only when `ai.send_resume = true`, and only with postings from your own search. With the default provider that's Anthropic's API, under your API account's [data terms](https://www.anthropic.com/legal/commercial-terms). The posting and resume are passed to the model as data with instructions to ignore any instructions inside them. Fit notes are written by a model, so read the announcement before you rely on them.
+**Privacy.** Your resume is read on your computer. It goes to the provider only when `ai.send_resume = true`, and only with postings from your own search. Each way's terms are in [docs/AI.md](docs/AI.md): with a subscription (Claude, ChatGPT, Google) it's that subscription's terms, with `anthropic` your API account's [commercial terms](https://www.anthropic.com/legal/commercial-terms), and with Ollama nothing leaves your computer. The posting and resume are passed to the model as data with instructions to ignore any instructions inside them, and the CLI providers run with their tools off (Claude) or read-only (Codex, Gemini). Fit notes are written by a model, so read the announcement before you rely on them.
 
-**Other models.** Set `ai.provider = "command"` and `ai.command = ["ollama", "run", "llama3.1"]` (or any program) to keep everything on your computer: the prompt goes to the program's standard input, and it must print the JSON answer. You can also point `ai.provider` at your own Python factory, `"my_package.my_module:make_provider"`; see [`fit.py`](src/usajobs_monitor/fit.py) for the interface.
-
-**Claude Code on your subscription.** To use your Claude plan instead of an API key, point the command provider at the Claude Code command line, with its tools turned off:
-
-```toml
-[ai]
-provider = "command"
-command  = ["/full/path/to/claude", "-p", "--tools", "", "--strict-mcp-config",
-            "--disable-slash-commands", "--no-session-persistence"]
-# add "--model", "claude-sonnet-5-5" to choose a model; ai.model is ignored here
-```
-
-Keep those flags. A plain `claude -p` can run shell commands, edit files and use your MCP servers (with no prompts at all if your Claude Code settings allow that), and the prompt it gets includes job posting text from the internet. `--tools ""` and `--strict-mcp-config` leave it nothing to act with, and `--no-session-persistence` stops Claude Code from saving a transcript, with your resume in it, for every posting. `check-config` warns when a `claude` command is missing them.
-
-**A profile can't run code by itself.** Both of those run code on your computer, so a profile that names one is refused until you also allow it outside the file, in the environment, with the exact command line or factory path: `export USAJOBS_ALLOW_AI_PROVIDER='ollama run llama3.1'` (comma-separate several). `check-config` prints the value to set. The whole command line must match, so allowing `python3 my_model.py` doesn't let another profile run `python3 -c ...`. This way a profile someone shares with you can't start a program or import code just because you ran it. Read any shared profile's `[ai]` table before you allow it.
+**A profile can't run code by itself.** The CLI, Ollama and `command` providers run a program on your computer, so a profile that names one is refused until you also allow it outside the file with `USAJOBS_ALLOW_AI_PROVIDER`: the provider's name (`claude-cli`), or for `command` the exact command line (`'llm -m gpt-5'`; comma-separate several). `check-config` prints the value to set. The whole command line must match, so allowing `python3 my_model.py` doesn't let another profile run `python3 -c ...`. This way a profile someone shares with you can't start a program or import code just because you ran it. Read any shared profile's `[ai]` table before you allow it.
 
 ### MCP server
 

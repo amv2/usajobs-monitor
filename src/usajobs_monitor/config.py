@@ -66,7 +66,24 @@ TARGET_FILTER_KEYS = ("salary_upper_must_exceed", "near_miss_upper_salary_must_e
                       "near_miss_min_gs_grade", "min_gs_grade", "watch_list")
 ENV_NAME = r"[A-Za-z_][A-Za-z0-9_]{0,99}"
 # The optional AI add-on ([ai]); see fit.py. Nothing here is used unless asked for.
-AI_PROVIDERS = ("anthropic", "command")
+# Ready-made setups for AI command-line tools people already have, so a profile names
+# the tool instead of spelling out its flags. Each runs with its file and shell tools
+# off, because postings are untrusted text. ``ai.model``, when set, is added with the
+# tool's model flag (``ollama`` needs one: it is the model to run). claude's --safe-mode
+# also leaves out your CLAUDE.md, memory, plugins and MCP servers.
+AI_PRESETS: dict[str, dict[str, Any]] = {
+    "claude-cli": {"program": "claude", "model_flag": "--model",
+                   "args": ["-p", "--safe-mode", "--tools", "", "--strict-mcp-config", "--disable-slash-commands",
+                            "--no-session-persistence"]},
+    "codex-cli": {"program": "codex", "model_flag": "--model",
+                  "args": ["exec", "--sandbox", "read-only", "--skip-git-repo-check", "-"]},
+    "gemini-cli": {"program": "gemini", "model_flag": "--model",
+                   "args": ["--approval-mode", "plan", "-p", "Answer the request above."]},
+    "ollama": {"program": "ollama", "model_flag": "", "args": ["run", "{model}", "--format", "json"]},
+}
+AI_PROVIDERS = ("anthropic", "command", *AI_PRESETS)
+# A model name, never something a tool could read as a flag.
+AI_MODEL_NAME = r"[A-Za-z0-9][\w.:/@-]{0,99}"
 AI_PROVIDER_PATH = r"[A-Za-z_][\w.]*:[A-Za-z_]\w*"  # or "package.module:factory"
 # A profile can't run a program or import code on its own: the person running it must
 # also name that program or factory here, outside the file. Shared profiles stay data.
@@ -503,8 +520,19 @@ def _check_ai(check: _Checker, config: dict[str, Any]) -> None:
     check.string(ai, "provider", path, "anthropic")
     provider = ai.get("provider")
     if isinstance(provider, str) and provider not in AI_PROVIDERS and not re.fullmatch(AI_PROVIDER_PATH, provider):
-        check.error("ai.provider", 'expected "anthropic", "command", or "package.module:factory"')
-    check.string(ai, "model", path, DEFAULT_AI_MODEL)
+        check.error("ai.provider", "expected " + ", ".join(f'"{name}"' for name in AI_PROVIDERS)
+                    + ', or "package.module:factory"')
+    # The Claude API needs a model; the command-line tools use their own default unless one is set.
+    check.string(ai, "model", path, DEFAULT_AI_MODEL if provider == "anthropic" else "")
+    model = ai.get("model")
+    if provider in AI_PRESETS and isinstance(model, str):
+        if not model and not AI_PRESETS[provider]["model_flag"]:
+            check.error("ai.model", f'required with provider = "{provider}": the model to run, for example "llama3.1"')
+        elif model and not re.fullmatch(AI_MODEL_NAME, model):
+            check.error("ai.model", "expected a model name such as gpt-5 or llama3.1")
+    if provider in AI_PRESETS and ai.get("command"):
+        check.error("ai.command", f'not used with provider = "{provider}"; use provider = "command" to run your own '
+                    "command line")
     check.string(ai, "effort", path, "medium", choices=AI_EFFORTS)
     check.string(ai, "api_key_env", path, DEFAULT_AI_KEY_ENV)
     if isinstance(ai.get("api_key_env"), str) and not re.fullmatch(ENV_NAME, ai["api_key_env"]):
@@ -555,6 +583,19 @@ def claude_command_warnings(command: list[str]) -> list[str]:
             "no transcripts (see the README)"]
 
 
+def ai_preset_command(ai: Mapping[str, Any]) -> list[str]:
+    """The command line a preset provider runs, with ``ai.model`` filled in."""
+    preset = AI_PRESETS[str(ai["provider"])]
+    model = str(ai.get("model") or "")
+    args = [model if arg == "{model}" else arg for arg in preset["args"]]
+    if model and preset["model_flag"]:
+        # In one argument, so the name can't be read as a separate flag. Before a
+        # trailing "-" (read the prompt from standard input), which ends the options.
+        at = len(args) - 1 if args[-1:] == ["-"] else len(args)
+        args.insert(at, f"{preset['model_flag']}={model}")
+    return [preset["program"], *args]
+
+
 def ai_provider_allowance(ai: Mapping[str, Any]) -> str:
     """The value ``USAJOBS_ALLOW_AI_PROVIDER`` must list before this provider runs, or ""
     for the built-in ``anthropic`` provider, which runs no local code."""
@@ -581,7 +622,11 @@ def ai_provider_allowed(ai: Mapping[str, Any], env: Mapping[str, str]) -> bool:
 
 def ai_provider_hint(ai: Mapping[str, Any]) -> str:
     needed = ai_provider_allowance(ai)
-    what = f"run {needed}" if ai.get("provider") == "command" else f"import and call {needed}"
+    provider = ai.get("provider")
+    if provider in AI_PRESETS:
+        what = f"run {AI_PRESETS[str(provider)]['program']}, an AI tool on this computer"
+    else:
+        what = f"run {needed}" if provider == "command" else f"import and call {needed}"
     return (f"ai.provider would {what}. A profile can't do that by itself: if you trust it, set "
             f"{AI_ALLOW_ENV}={shlex.quote(needed)} in the environment (comma-separate several)")
 
