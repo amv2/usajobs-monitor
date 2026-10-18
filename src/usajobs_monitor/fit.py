@@ -47,13 +47,15 @@ from .jobs import (
 from .config import ai_provider_allowed, ai_provider_hint
 from .resume_text import ResumeError, find_resume, read_resume
 from .review import ReviewResult
+from .tracking import FIT_LABELS
 
 FIT_NOTES_NAME = "usajobs_fit_notes.md"
 FIT_CACHE_NAME = "usajobs_fit_notes_cache.json"
-PROMPT_VERSION = 1
+PROMPT_VERSION = 2
 CACHE_KEEP_DAYS = 45
 FIELD_CHARS = 6000
 FIT_LEVELS = ("strong", "possible", "stretch", "unlikely")
+REQUIREMENT_STATUSES = ("met", "unclear", "missing")
 # Models that take the server-side refusal fallback (``fallbacks: "default"``).
 FALLBACK_MODELS = {"claude-opus-5-5", "claude-opus-5", "claude-fable-5-1", "claude-sonnet-5-5"}
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
@@ -63,12 +65,25 @@ FIT_SCHEMA: dict[str, Any] = {
     "properties": {
         "fit": {"type": "string", "enum": list(FIT_LEVELS)},
         "summary": {"type": "string"},
+        "requirements": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "requirement": {"type": "string"},
+                    "status": {"type": "string", "enum": list(REQUIREMENT_STATUSES)},
+                    "evidence": {"type": "string"},
+                },
+                "required": ["requirement", "status", "evidence"],
+                "additionalProperties": False,
+            },
+        },
         "strengths": {"type": "array", "items": {"type": "string"}},
         "gaps": {"type": "array", "items": {"type": "string"}},
         "resume_tips": {"type": "array", "items": {"type": "string"}},
         "questions_to_verify": {"type": "array", "items": {"type": "string"}},
     },
-    "required": ["fit", "summary", "strengths", "gaps", "resume_tips", "questions_to_verify"],
+    "required": ["fit", "summary", "requirements", "strengths", "gaps", "resume_tips", "questions_to_verify"],
     "additionalProperties": False,
 }
 
@@ -82,6 +97,12 @@ selective factors, and the main duties. Ground every strength and gap in specifi
 assume experience the resume does not show. Federal HR specialists screen resumes literally, so note where \
 experience exists but is not stated in the posting's terms, and where a federal resume would need dates, \
 hours per week, grade or series to get credit.
+
+List each required qualification in requirements: the specialized experience statement, any required \
+education, certification or license, and each selective factor, in the posting's own words, shortened. Leave \
+out preferred or desirable qualifications. Mark each "met" when the resume plainly shows it, "unclear" when \
+it might be there but is not stated in the posting's terms, or "missing" when the resume does not show it; \
+evidence quotes or closely paraphrases the resume wording, or says what is absent.
 
 Fit levels: "strong" means the resume plainly shows the specialized experience; "possible" means it likely \
 qualifies with clearer wording; "stretch" means important requirements are thin or missing; "unlikely" \
@@ -263,11 +284,28 @@ def parse_fit(text: str) -> dict[str, Any]:
     fit = str(data.get("fit") or "").strip().lower()
     if fit not in FIT_LEVELS:
         raise FitError("the AI provider's answer has no valid fit level")
-    note: dict[str, Any] = {"fit": fit, "summary": str(data.get("summary") or "").strip()}
+    raw = data.get("requirements")
+    requirements = []
+    for item in raw if isinstance(raw, list) else []:
+        if isinstance(item, dict) and str(item.get("status") or "").strip().lower() in REQUIREMENT_STATUSES:
+            requirements.append({"requirement": str(item.get("requirement") or "").strip(),
+                                 "status": str(item["status"]).strip().lower(),
+                                 "evidence": str(item.get("evidence") or "").strip()})
+    note: dict[str, Any] = {"fit": capped_fit(fit, requirements), "summary": str(data.get("summary") or "").strip(),
+                            "requirements": requirements[:8]}
     for key in ("strengths", "gaps", "resume_tips", "questions_to_verify"):
         items = data.get(key) or []
         note[key] = [str(item).strip() for item in items if str(item).strip()][:8] if isinstance(items, list) else []
     return note
+
+
+def capped_fit(fit: str, requirements: list[dict[str, str]]) -> str:
+    """The model's level, lowered to what its own requirement checklist supports:
+    a missing requirement means "unlikely", an unclear one at best "possible".
+    Keeps rankings consistent with the evidence shown next to them."""
+    statuses = {item["status"] for item in requirements}
+    cap = "unlikely" if "missing" in statuses else "possible" if "unclear" in statuses else "strong"
+    return max(fit, cap, key=FIT_LEVELS.index)
 
 
 def fit_note(result: ReviewResult, resume: str, provider: Provider, tier: str = "") -> dict[str, Any]:
@@ -350,6 +388,7 @@ def run_fit_notes(settings: Any, view: Any, output_dir: Path, today: date,
                 failures.append(f"{number}: fit note failed ({type(exc).__name__})")
                 continue
             cache[key] = note
+        view.fits[number] = note["fit"]
         notes.append({**note, "tier": tier, "control_number": number, "url": job_url(result.job),
                       "title": str(result.job.get("PositionTitle") or ""),
                       "agency": str(result.job.get("OrganizationName") or "")})
@@ -366,11 +405,16 @@ def run_fit_notes(settings: Any, view: Any, output_dir: Path, today: date,
     return outcome
 
 
-FIT_LABELS = {"strong": "Strong fit", "possible": "Possible fit", "stretch": "Stretch", "unlikely": "Unlikely fit"}
+REQUIREMENT_LABELS = {"met": "Met", "unclear": "Unclear", "missing": "Missing"}
 
 
 def render_note(note: Mapping[str, Any]) -> str:
     lines = [f"**{FIT_LABELS.get(note['fit'], note['fit'])}.** {note['summary']}".rstrip()]
+    if note.get("requirements"):
+        lines += ["", "Requirements:"]
+        for item in note["requirements"]:
+            evidence = f" ({item['evidence']})" if item.get("evidence") else ""
+            lines.append(f"- {REQUIREMENT_LABELS.get(item['status'], item['status'])}: {item['requirement']}{evidence}")
     for key, heading in (("strengths", "Strengths"), ("gaps", "Gaps"), ("resume_tips", "Resume tips"),
                          ("questions_to_verify", "Check before applying")):
         if note.get(key):

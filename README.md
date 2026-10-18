@@ -501,7 +501,7 @@ Everything above works without AI. This section adds two optional pieces.
 
 ### Resume fit notes
 
-For each match (and watch-list job, by default), a model reads the posting's qualifications, duties and specialized experience statement next to your resume and writes a short note: a fit level (strong, possible, stretch or unlikely), the resume evidence for it, gaps, wording to change so an HR specialist gives you credit, and anything to confirm before applying. Notes land in `usajobs_fit_notes.md` next to the other reports.
+For each match (and watch-list job, by default), a model reads the posting's qualifications, duties and specialized experience statement next to your resume and writes a short note: each required qualification marked met, unclear or missing with the resume evidence, a fit level (strong, possible, stretch or unlikely) that never runs ahead of that checklist, gaps, wording to change so an HR specialist gives you credit, and anything to confirm before applying. Notes land in `usajobs_fit_notes.md`, and the fit level also shows on each job in the reports and alerts.
 
 ```bash
 pip install -e ".[ai]"                       # Claude API client, plus PDF resume reading
@@ -515,11 +515,14 @@ Get an API key from the [Claude Console](https://platform.claude.com/). Then add
 resume      = "resume.md"   # .md, .txt, .docx or .pdf; relative to this file
 send_resume = true          # required: without it your resume never leaves your computer
 fit_notes   = true          # add notes to every run
+# rank     = true                        # list stronger fits first (nothing is hidden)
 # lists    = ["matches", "watch_list"]   # also "near_misses"
 # max_jobs = 10                          # at most this many postings per run
 # model    = "claude-opus-5-5"
 # effort   = "medium"                    # low, medium, high, xhigh or max
 ```
+
+With `rank = true`, each list is sorted by fit level: strong, possible, then postings without a note, then stretch and unlikely. Nothing is dropped, so a wrong "unlikely" only moves a job down. The AI judges the minimum qualifications from your resume, not how the assessment questionnaire will place you.
 
 Notes are cached by posting, resume and model, so a run three times a week pays only for postings it hasn't reviewed yet. Changing your resume refreshes them. A failed note never fails the run: the reports still publish, and the reason is in the run summary.
 

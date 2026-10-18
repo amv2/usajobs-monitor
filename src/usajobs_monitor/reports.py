@@ -147,6 +147,11 @@ def active_filters_text(config: dict[str, Any], decisions_name: str) -> list[str
 
     lines.append(f"Your decisions: postings marked not interested in {decisions_name} are hidden; "
                  "applied and watching postings are flagged.")
+    ai = config.get("ai") or {}
+    if ai.get("rank") and ai.get("fit_notes") and ai.get("send_resume") is True:
+        lines.append("AI ranking: within each list, postings the AI rated a stronger fit for your resume come first, "
+                     "then unrated ones, then stretches and unlikely fits. Nothing is hidden, and the AI judges only "
+                     "the minimum qualifications, not the assessment questionnaire.")
     return lines
 
 
@@ -169,6 +174,8 @@ def add_job_paragraph(doc: Any, result: ReviewResult, view: RunView, *, reason: 
     p.add_run(f"\nClose date: {job.get('ApplicationCloseDate', 'Not listed')}")
     if view.your_status(result):
         p.add_run(f"\nYour status: {view.your_status(result)}")
+    if view.fit_text(result):
+        p.add_run(f"\nAI fit: {view.fit_text(result)} (see the fit notes)")
     if reason:
         p.add_run(f"\nWhy excluded: {reason}")
     p.add_run(f"\nUSAJOBS: {job_url(job)} (control number {job_id(job)})")
@@ -264,8 +271,9 @@ EXCEL_HEADERS = [
     "Status", "Score", "Title", "Agency", "Department", "Pay Plan", "Grade",
     "Promotion Potential / Full Performance Level", "Occupational Series", "Location", "Salary",
     "Close Date", "USAJOBS URL", "Exclusion Reasons", "Eligibility Basis", "Flags", "Your Status", "Control Number",
+    "AI Fit",
 ]
-EXCEL_WIDTHS = [12, 8, 38, 32, 26, 16, 14, 38, 28, 30, 24, 16, 48, 52, 70, 22, 24, 16]
+EXCEL_WIDTHS = [12, 8, 38, 32, 26, 16, 14, 38, 28, 30, 24, 16, 48, 52, 70, 22, 24, 16, 14]
 
 
 def excel_row(status: str, result: ReviewResult, view: RunView, reasons: str) -> list[Any]:
@@ -276,6 +284,7 @@ def excel_row(status: str, result: ReviewResult, view: RunView, reasons: str) ->
         promotion_potential_display(job), occupational_series_display(job), location_display(job),
         salary_display(job), job.get("ApplicationCloseDate", ""), job_url(job), reasons,
         result.eligibility_basis, view.flag_text(result), view.your_status(result), job_id(job),
+        view.fit_text(result),
     ]
 
 
@@ -372,6 +381,7 @@ def summary_entry(result: ReviewResult, view: RunView, *, with_reasons: bool = F
         "eligibility_basis": result.eligibility_basis,
         "flags": view.flags.get(job_id(job), []),
         "your_status": view.your_status(result),
+        "ai_fit": view.fit_text(result),
         "qualification_summary": re.sub(r"\s+", " ", as_text(job.get("QualificationSummary"))).strip()[:QUALIFICATION_CHARS],
     }
     if with_reasons:
@@ -454,6 +464,8 @@ def _html_job(result: ReviewResult, view: RunView, reason: str = "") -> str:
     ]
     if view.your_status(result):
         facts.append(("Your status", view.your_status(result)))
+    if view.fit_text(result):
+        facts.append(("AI fit", view.fit_text(result)))
     if reason:
         facts.append(("Why excluded", reason))
     if result.eligibility_basis:

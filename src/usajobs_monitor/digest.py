@@ -123,6 +123,8 @@ def _item(entry: dict, *, eligibility: bool = True) -> Item:
         details.append(f"Eligibility: {text(entry.get('eligibility_basis'))}")
     if entry.get("your_status"):
         details.append(f"Your status: {text(entry.get('your_status'))}")
+    if entry.get("ai_fit"):
+        details.append(f"AI fit: {text(entry.get('ai_fit'))}")
     return Item(title, details, job_url(entry.get("url")))
 
 

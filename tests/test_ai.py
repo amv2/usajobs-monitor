@@ -228,11 +228,105 @@ class FitNoteTests(unittest.TestCase):
         fit.run_fit_notes(settings, self.view(settings, [job("1"), job("2")]), self.out, date.today(), provider)
         self.assertEqual(len(provider.calls), 1)
 
+    def test_requirement_checklist_caps_the_level(self):
+        met = {"requirement": "One year at GS-11", "status": "met", "evidence": "five years of execution"}
+        unclear = {**met, "status": "unclear"}
+        missing = {"requirement": "CPA license", "status": "missing", "evidence": "no license listed"}
+        for level, requirements, expected in (("strong", [met], "strong"), ("strong", [met, unclear], "possible"),
+                                              ("possible", [met, missing], "unlikely"),
+                                              ("stretch", [met], "stretch")):
+            with self.subTest(level=level, expected=expected):
+                note = fit.parse_fit(json.dumps({**GOOD_ANSWER, "fit": level, "requirements": requirements}))
+                self.assertEqual(note["fit"], expected)
+
+    def test_requirements_are_kept_and_shown(self):
+        answer = {**GOOD_ANSWER, "requirements": [
+            {"requirement": "One year at GS-11", "status": "Met", "evidence": "five years of execution"},
+            {"requirement": "ignored", "status": "maybe", "evidence": ""}]}
+        note = fit.parse_fit(json.dumps(answer))
+        self.assertEqual(note["requirements"], [{"requirement": "One year at GS-11", "status": "met",
+                                                 "evidence": "five years of execution"}])
+        self.assertIn("- Met: One year at GS-11 (five years of execution)", fit.render_note(note))
+        self.assertIn("requirements", fit.FIT_SCHEMA["required"])
+
+    def test_run_records_fit_levels_on_the_view(self):
+        settings = self.settings()
+        view = self.view(settings, [job("1"), job("2")])
+        fit.run_fit_notes(settings, view, self.out, date.today(), FakeProvider())
+        self.assertEqual(view.fits, {"1": "possible", "2": "possible"})
+        self.assertEqual(view.fit_text(view.matches[0]), "Possible fit")
+
+    def test_rank_by_fit_reorders_without_hiding(self):
+        settings = self.settings()
+        view = self.view(settings, [job("1"), job("2"), job("3"), job("4")])
+        view.fits = {"1": "unlikely", "2": "strong", "4": "stretch"}
+        view.rank_by_fit()
+        self.assertEqual([r.job["PositionURI"][-1] for r in view.matches], ["2", "3", "4", "1"])
+
     def test_missing_resume_reports_without_raising(self):
         settings = self.settings(resume="gone.md")
         outcome = fit.run_fit_notes(settings, self.view(settings, [job()]), self.out, date.today(), FakeProvider())
         self.assertEqual(outcome["status"], "error")
         self.assertIn("gone.md", outcome["message"])
+
+
+class RankedRunTests(unittest.TestCase):
+    """ai.rank reorders every report and the digest summary by fit level."""
+
+    def setUp(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.base = Path(temp.name)
+        (self.base / "resume.md").write_text("Budget analyst, five years of execution.", encoding="utf-8")
+        self.addCleanup(mock.patch.stopall)
+        jobs = [job("1"), job("2"), job("3")]
+        for posting in jobs:
+            posting["PositionRemuneration"] = [{"MinimumRange": "90000", "MaximumRange": "150000"}]
+        from usajobs_monitor import api
+        mock.patch.object(api, "search_all_jobs", return_value=(jobs, 1, [])).start()
+        levels = {"1": "unlikely", "2": "strong", "3": "stretch"}
+
+        class ByNumber(FakeProvider):
+            def complete(self, system, prompt):
+                number = prompt.split("usajobs.gov/job/")[1][0] if "usajobs.gov/job/" in prompt else "1"
+                return json.dumps({**GOOD_ANSWER, "fit": levels[number]})
+
+        mock.patch.object(fit, "make_provider", return_value=ByNumber()).start()
+        mock.patch.object(fit, "posting_text", side_effect=lambda result, tier="": result.job["PositionURI"]).start()
+
+    def run_search(self, **ai):
+        from usajobs_monitor import runner
+        ai = {"fit_notes": True, "send_resume": True, "resume": "resume.md", **ai}
+        raw = {**BASE, "ai": ai, "report": {"formats": ["docx", "xlsx", "html", "csv"]}}
+        settings = load_settings(self.base / "p.toml", require_credentials=False, raw=raw)
+        out = self.base / "out"
+        return runner.run_search(settings, out), out
+
+    def test_rank_orders_matches_and_reports(self):
+        summary, out = self.run_search(rank=True)
+        self.assertTrue(summary["fit_notes"]["ranked"])
+        self.assertEqual([m["control_number"] for m in summary["matches"]], ["2", "3", "1"])
+        self.assertEqual([m["ai_fit"] for m in summary["matches"]], ["Strong fit", "Stretch", "Unlikely fit"])
+        page = (out / "usajobs_digest.html").read_text()
+        self.assertLess(page.index("job/2"), page.index("job/1"))
+        self.assertIn("AI fit:</b> Strong fit", page)
+        self.assertIn("AI ranking:", page)
+        import csv
+        rows = list(csv.DictReader((out / "usajobs_jobs.csv").read_text(encoding="utf-8-sig").splitlines()))
+        self.assertEqual({row["Control Number"]: row["AI Fit"] for row in rows},
+                         {"1": "Unlikely fit", "2": "Strong fit", "3": "Stretch"})
+
+    def test_without_rank_order_is_unchanged_but_fit_is_shown(self):
+        summary, _ = self.run_search()
+        self.assertNotIn("ranked", summary["fit_notes"])
+        self.assertEqual([m["control_number"] for m in summary["matches"]], ["1", "2", "3"])
+        self.assertEqual(summary["matches"][1]["ai_fit"], "Strong fit")
+
+    def test_rank_config_defaults_off_and_warns_without_fit_notes(self):
+        config, warnings = validate_config(BASE)
+        self.assertFalse(config["ai"]["rank"])
+        _, warnings = validate_config({**BASE, "ai": {"rank": True}})
+        self.assertTrue(any("ai.rank" in w for w in warnings))
 
 
 class ProviderTests(unittest.TestCase):

@@ -499,7 +499,7 @@ def _check_ai(check: _Checker, config: dict[str, Any]) -> None:
                     + str(ai.get("api_key_env") or DEFAULT_AI_KEY_ENV))
         del ai["api_key"]
     check.unknown(ai, path, {"provider", "model", "effort", "api_key_env", "command", "resume", "send_resume",
-                             "fit_notes", "lists", "max_jobs", "timeout_seconds"})
+                             "fit_notes", "rank", "lists", "max_jobs", "timeout_seconds"})
     check.string(ai, "provider", path, "anthropic")
     provider = ai.get("provider")
     if isinstance(provider, str) and provider not in AI_PROVIDERS and not re.fullmatch(AI_PROVIDER_PATH, provider):
@@ -515,6 +515,7 @@ def _check_ai(check: _Checker, config: dict[str, Any]) -> None:
     check.string(ai, "resume", path, "")
     check.boolean(ai, "send_resume", path, False)
     check.boolean(ai, "fit_notes", path, False)
+    check.boolean(ai, "rank", path, False)
     check.strings(ai, "lists", path, ["matches", "watch_list"])
     for index, name in enumerate(ai.get("lists") or []):
         if isinstance(name, str) and name not in AI_LISTS:
@@ -529,6 +530,8 @@ def _check_ai(check: _Checker, config: dict[str, Any]) -> None:
     if ai.get("fit_notes") is True and ai.get("send_resume") is not True:
         check.warnings.append("ai.fit_notes: needs ai.send_resume = true before your resume is sent to the "
                               "AI provider; runs skip fit notes until then")
+    if ai.get("rank") is True and ai.get("fit_notes") is not True:
+        check.warnings.append("ai.rank: needs ai.fit_notes = true; lists keep their usual order until then")
 
 
 def ai_provider_allowance(ai: Mapping[str, Any]) -> str:
