@@ -501,7 +501,7 @@ Everything above works without AI. This section adds two optional pieces.
 
 ### Resume fit notes
 
-For each match (and watch-list job, by default), a model reads the posting's qualifications, duties and specialized experience statement next to your resume and writes a short note: each required qualification marked met, unclear or missing with the resume evidence, a fit level (strong, possible, stretch or unlikely) that never runs ahead of that checklist, gaps, wording to change so an HR specialist gives you credit, and anything to confirm before applying. Notes land in `usajobs_fit_notes.md`, and the fit level also shows on each job in the reports and alerts.
+For each match (and watch-list job, by default), a model reads the posting's qualifications, duties and specialized experience statement next to your resume and writes a short note: each required qualification marked met, unclear or not shown on resume with the resume evidence, a fit level (strong, possible, stretch or unlikely) that never runs ahead of that checklist (one requirement not shown caps it at stretch, two or more at unlikely, an unclear one at possible), gaps, wording to change so an HR specialist gives you credit, and anything to confirm before applying. Notes land in `usajobs_fit_notes.md`, and the fit level also shows on each job in the reports and alerts, with an "AI gaps" line naming what the resume doesn't show. When the checklist lowered the AI's own level, the reports say so, for example "Stretch (AI said Possible)". "Not shown on resume" often means a wording gap rather than missing experience, so check those against what you've actually done.
 
 ```bash
 pip install -e ".[ai]"                       # Claude API client, plus PDF resume reading

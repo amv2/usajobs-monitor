@@ -51,7 +51,7 @@ from .tracking import FIT_LABELS, FIT_RANK
 
 FIT_NOTES_NAME = "usajobs_fit_notes.md"
 FIT_CACHE_NAME = "usajobs_fit_notes_cache.json"
-PROMPT_VERSION = 2
+PROMPT_VERSION = 3
 CACHE_KEEP_DAYS = 45
 FIELD_CHARS = 6000
 FIT_LEVELS = ("strong", "possible", "stretch", "unlikely")
@@ -318,6 +318,8 @@ def parse_fit(text: str, resume_names: list[str] | None = None) -> dict[str, Any
                                  "evidence": str(item.get("evidence") or "").strip()})
     note: dict[str, Any] = {"fit": capped_fit(fit, requirements), "summary": str(data.get("summary") or "").strip(),
                             "requirements": requirements[:8]}
+    # The AI's own level, kept when the checklist lowered it, so the reports can say why.
+    note["ai_fit"] = fit if note["fit"] != fit else ""
     used = str(data.get("resume_used") or "").strip()
     note["resume_used"] = used if used in (resume_names or []) else ""
     for key in ("strengths", "gaps", "resume_tips", "questions_to_verify"):
@@ -328,10 +330,13 @@ def parse_fit(text: str, resume_names: list[str] | None = None) -> dict[str, Any
 
 def capped_fit(fit: str, requirements: list[dict[str, str]]) -> str:
     """The model's level, lowered to what its own requirement checklist supports:
-    a missing requirement means "unlikely", an unclear one at best "possible".
-    Keeps rankings consistent with the evidence shown next to them."""
-    statuses = {item["status"] for item in requirements}
-    cap = "unlikely" if "missing" in statuses else "possible" if "unclear" in statuses else "strong"
+    one requirement not shown on the resume means at best "stretch", two or more
+    "unlikely", an unclear one at best "possible". "Missing" means the resume does
+    not show it, which is often a wording gap, so a single one stops at "stretch"."""
+    statuses = [item["status"] for item in requirements]
+    missing = statuses.count("missing")
+    cap = ("unlikely" if missing >= 2 else "stretch" if missing else
+           "possible" if "unclear" in statuses else "strong")
     return max(fit, cap, key=FIT_LEVELS.index)
 
 
@@ -426,6 +431,10 @@ def run_fit_notes(settings: Any, view: Any, output_dir: Path, today: date,
             view.fit_resumes[number] = note["resume_used"]
         if note.get("summary"):
             view.fit_summaries[number] = note["summary"]
+        if gap_text(note):
+            view.fit_gaps[number] = gap_text(note)
+        if note.get("ai_fit"):
+            view.fit_lowered[number] = note["ai_fit"]
         notes.append({**note, "tier": tier, "control_number": number, "url": job_url(result.job),
                       "title": str(result.job.get("PositionTitle") or ""),
                       "agency": str(result.job.get("OrganizationName") or "")})
@@ -449,11 +458,31 @@ def run_fit_notes(settings: Any, view: Any, output_dir: Path, today: date,
     return outcome
 
 
-REQUIREMENT_LABELS = {"met": "Met", "unclear": "Unclear", "missing": "Missing"}
+REQUIREMENT_LABELS = {"met": "Met", "unclear": "Unclear", "missing": "Not shown on resume"}
+
+
+def gap_text(note: Mapping[str, Any]) -> str:
+    """The requirements the resume does not show or shows unclearly, in one line,
+    for the reports. Empty when everything was met."""
+    parts = []
+    for status in ("missing", "unclear"):
+        items = [item["requirement"] for item in note.get("requirements") or [] if item["status"] == status]
+        if items:
+            parts.append(f"{REQUIREMENT_LABELS[status]}: {'; '.join(items)}")
+    return ". ".join(parts)
+
+
+def lowered_text(note: Mapping[str, Any]) -> str:
+    """Why the checklist lowered the AI's own level, or empty when it did not."""
+    if not note.get("ai_fit"):
+        return ""
+    return f"AI said {FIT_LABELS.get(note['ai_fit'], note['ai_fit'])}; lowered by the requirement checklist"
 
 
 def render_note(note: Mapping[str, Any]) -> str:
-    lines = [f"**Fit: {FIT_LABELS.get(note['fit'], note['fit'])}.** {note['summary']}".rstrip()]
+    lowered = lowered_text(note)
+    lines = [f"**Fit: {FIT_LABELS.get(note['fit'], note['fit'])}.**" + (f" ({lowered}.)" if lowered else "")
+             + f" {note['summary']}".rstrip()]
     if note.get("resume_used"):
         lines += ["", f"Best resume for this posting: {note['resume_used']}"]
     if note.get("requirements"):

@@ -199,12 +199,25 @@ class RunView:
     fit_resumes: dict[str, str] = field(default_factory=dict)
     # The AI's two- or three-sentence summary, for the Word and HTML reports.
     fit_summaries: dict[str, str] = field(default_factory=dict)
+    # Requirements the resume does not show or shows unclearly, as one line.
+    fit_gaps: dict[str, str] = field(default_factory=dict)
+    # The AI's own level when its requirement checklist lowered it.
+    fit_lowered: dict[str, str] = field(default_factory=dict)
 
     def fit_text(self, result: ReviewResult) -> str:
         number = job_id(result.job)
         label = FIT_LABELS.get(self.fits.get(number, ""), "")
-        resume = self.fit_resumes.get(number)
-        return f"{label} (resume: {resume})" if label and resume else label
+        if not label:
+            return ""
+        notes = []
+        if self.fit_lowered.get(number):
+            notes.append(f"AI said {FIT_LABELS.get(self.fit_lowered[number], self.fit_lowered[number])}")
+        if self.fit_resumes.get(number):
+            notes.append(f"resume: {self.fit_resumes[number]}")
+        return f"{label} ({'; '.join(notes)})" if notes else label
+
+    def fit_gap_text(self, result: ReviewResult) -> str:
+        return self.fit_gaps.get(job_id(result.job), "")
 
     def rank_by_fit(self) -> None:
         """Sort each list by AI fit level, keeping the current order within a level.

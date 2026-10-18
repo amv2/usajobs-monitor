@@ -180,6 +180,8 @@ def add_job_paragraph(doc: Any, result: ReviewResult, view: RunView, *, reason: 
     if view.fit_text(result):
         summary = view.fit_summaries.get(job_id(job), "")
         p.add_run(f"\nAI fit: {view.fit_text(result)}" + (f". {summary}" if summary else ""))
+        if view.fit_gap_text(result):
+            p.add_run(f"\nAI gaps: {view.fit_gap_text(result)}")
     if reason:
         p.add_run(f"\nWhy excluded: {reason}")
     p.add_run(f"\nUSAJOBS: {job_url(job)} (control number {job_id(job)})")
@@ -275,9 +277,9 @@ EXCEL_HEADERS = [
     "Status", "Score", "Title", "Agency", "Department", "Pay Plan", "Grade",
     "Promotion Potential / Full Performance Level", "Occupational Series", "Location", "Salary",
     "Close Date", "USAJOBS URL", "Exclusion Reasons", "Eligibility Basis", "Flags", "Your Status", "Control Number",
-    "AI Fit",
+    "AI Fit", "AI Gaps",
 ]
-EXCEL_WIDTHS = [12, 8, 38, 32, 26, 16, 14, 38, 28, 30, 24, 16, 48, 52, 70, 22, 24, 16, 14]
+EXCEL_WIDTHS = [12, 8, 38, 32, 26, 16, 14, 38, 28, 30, 24, 16, 48, 52, 70, 22, 24, 16, 14, 50]
 
 
 def excel_row(status: str, result: ReviewResult, view: RunView, reasons: str) -> list[Any]:
@@ -288,7 +290,7 @@ def excel_row(status: str, result: ReviewResult, view: RunView, reasons: str) ->
         promotion_potential_display(job), occupational_series_display(job), location_display(job),
         salary_display(job), job.get("ApplicationCloseDate", ""), job_url(job), reasons,
         result.eligibility_basis, view.flag_text(result), view.your_status(result), job_id(job),
-        view.fit_text(result),
+        view.fit_text(result), view.fit_gap_text(result),
     ]
 
 
@@ -386,6 +388,7 @@ def summary_entry(result: ReviewResult, view: RunView, *, with_reasons: bool = F
         "flags": view.flags.get(job_id(job), []),
         "your_status": view.your_status(result),
         "ai_fit": view.fit_text(result),
+        "ai_gaps": view.fit_gap_text(result),
         "qualification_summary": re.sub(r"\s+", " ", as_text(job.get("QualificationSummary"))).strip()[:QUALIFICATION_CHARS],
     }
     if with_reasons:
@@ -471,6 +474,8 @@ def _html_job(result: ReviewResult, view: RunView, reason: str = "") -> str:
     if view.fit_text(result):
         summary = view.fit_summaries.get(job_id(job), "")
         facts.append(("AI fit", view.fit_text(result) + (f". {summary}" if summary else "")))
+        if view.fit_gap_text(result):
+            facts.append(("AI gaps", view.fit_gap_text(result)))
     if reason:
         facts.append(("Why excluded", reason))
     if result.eligibility_basis:
