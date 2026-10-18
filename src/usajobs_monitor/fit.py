@@ -9,14 +9,18 @@ Providers are swappable (``ai.provider``):
 * ``"anthropic"`` (default): the Claude API through the ``anthropic`` package
   from the ``ai`` extra. The key comes from ``ANTHROPIC_API_KEY`` (or
   ``ai.api_key_env``) in the environment or the OS keychain.
+* ``"claude-cli"``, ``"codex-cli"``, ``"gemini-cli"``, ``"ollama"``: an AI
+  command-line tool you already have, run with ready-made flags (see
+  ``AI_PRESETS`` in config.py). They use that tool's own sign-in.
 * ``"command"``: any local program (``ai.command``), for example a local model
   runner. The prompt goes to its standard input and it prints the answer.
 * ``"package.module:factory"``: your own Python provider. ``factory(ai_config,
   env)`` returns an object with ``complete(system, prompt) -> str``.
 
-The last two run code on this computer, so a profile alone can't turn them on:
-``USAJOBS_ALLOW_AI_PROVIDER`` in the environment must also list the exact
-command line or factory path. A shared profile stays data.
+All but ``anthropic`` run code on this computer, so a profile alone can't turn
+them on: ``USAJOBS_ALLOW_AI_PROVIDER`` in the environment must also list the
+tool's name, the exact command line, or the factory path. A shared profile stays
+data. docs/AI.md compares the options.
 
 Every provider answers with the JSON object in ``FIT_SCHEMA``. Notes are cached
 by posting, resume and model, so a scheduled run pays only for new postings.
@@ -44,7 +48,7 @@ from .jobs import (
     pay_plan_display,
     salary_display,
 )
-from .config import ai_provider_allowed, ai_provider_hint
+from .config import AI_PRESETS, ai_preset_command, ai_provider_allowed, ai_provider_hint
 from .resume_text import MAX_RESUMES, ResumeError, pick_resumes, read_resumes, resume_names
 from .review import ReviewResult
 from .tracking import FIT_LABELS, FIT_RANK
@@ -200,10 +204,12 @@ class AnthropicProvider:
 class CommandProvider:
     """A local program: the prompt on standard input, the answer on standard output."""
 
-    def __init__(self, command: list[str], timeout: float) -> None:
+    def __init__(self, command: list[str], timeout: float, label: str = "", missing: str = "") -> None:
         self.command = list(command)
         self.timeout = timeout
-        self.label = f"command {Path(self.command[0]).name}"
+        self.label = label or f"command {Path(self.command[0]).name}"
+        self.missing = missing or f"ai.command: {self.command[0]} was not found"
+        self.name = "ai.command" if not label else f"ai.provider {label.split()[0]}"
 
     def complete(self, system: str, prompt: str) -> str:
         text = (f"{system}\n\nAnswer with only a JSON object that matches this JSON Schema:\n"
@@ -212,11 +218,11 @@ class CommandProvider:
             done = subprocess.run(self.command, input=text, capture_output=True, text=True, timeout=self.timeout,
                                   check=False)
         except FileNotFoundError:
-            raise FitError(f"ai.command: {self.command[0]} was not found", fatal=True) from None
+            raise FitError(self.missing, fatal=True) from None
         except subprocess.TimeoutExpired:
-            raise FitError(f"ai.command took longer than {self.timeout:g} seconds") from None
+            raise FitError(f"{self.name} took longer than {self.timeout:g} seconds") from None
         if done.returncode != 0:
-            raise FitError(f"ai.command exited with status {done.returncode}")
+            raise FitError(f"{self.name} exited with status {done.returncode}")
         return done.stdout
 
 
@@ -236,6 +242,11 @@ def make_provider(ai: Mapping[str, Any], env: Mapping[str, str] | None = None) -
         return AnthropicProvider(key, ai["model"], ai["effort"], timeout)
     if name == "command":
         return CommandProvider(ai["command"], timeout)
+    if name in AI_PRESETS:
+        program = AI_PRESETS[name]["program"]
+        missing = (f"ai.provider {name}: the {program} program was not found. Install it, or if it is installed, "
+                   "add its folder to PATH where this runs (schedulers often leave out folders like ~/.local/bin)")
+        return CommandProvider(ai_preset_command(ai), timeout, " ".join(filter(None, [name, ai["model"]])), missing)
     module_name, _, attr = name.partition(":")
     try:
         factory = getattr(importlib.import_module(module_name), attr)

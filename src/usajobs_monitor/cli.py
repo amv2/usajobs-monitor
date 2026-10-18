@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shlex
 import sys
 from pathlib import Path
 
@@ -74,9 +75,12 @@ def _ai_status(settings) -> str:
         resume = ", ".join(path.name for path in find_resumes(settings.ai_resume, settings.resume_folder))
     except ResumeError as exc:
         resume = f"not found ({exc})"
-    provider = f"{ai['provider']} {ai['model']}" if ai["provider"] == "anthropic" else ai["provider"]
+    provider = f"{ai['provider']} {ai['model']}" if ai["model"] and ai["provider"] != "command" else ai["provider"]
     sending = "allowed" if ai["send_resume"] else "not allowed (set ai.send_resume = true)"
     line = f"AI fit notes: on ({provider}); resume: {resume}; sending it to the provider: {sending}"
+    from .config import AI_ALLOW_ENV, ai_provider_allowance, ai_provider_allowed
+    if not ai_provider_allowed(ai, os.environ):
+        line += f"; this computer: not allowed yet (set {AI_ALLOW_ENV}={shlex.quote(ai_provider_allowance(ai))})"
     if ai["provider"] == "anthropic":
         from . import keychain
         line += f"; {ai['api_key_env']}: " + ("found" if keychain.environment().source(ai["api_key_env"]) else "missing")
