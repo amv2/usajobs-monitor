@@ -36,3 +36,24 @@ jobs:
 
       - name: Run tests
         run: python -m unittest discover -s tests -v
+
+  docker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Build the image
+        run: docker build -t usajobs-monitor:ci .
+
+      - name: Smoke test
+        run: |
+          docker run --rm usajobs-monitor:ci --version
+          docker run --rm usajobs-monitor:ci pay-table DCB
+          docker run --rm usajobs-monitor:ci profiles
+          # Bad schedule settings must fail fast with exit code 2.
+          status=0
+          docker run --rm -e USAJOBS_SCHEDULE_DAYS=funday usajobs-monitor:ci schedule || status=$?
+          test "$status" -eq 2

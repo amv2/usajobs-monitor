@@ -59,6 +59,8 @@ pip install -e .
 
 If you use [uv](https://docs.astral.sh/uv/): `uv venv && uv pip install -e .`
 
+Prefer containers? Skip the Python setup and see [Docker](#docker) under step 7.
+
 Check the install:
 
 ```bash
@@ -400,6 +402,57 @@ Register-ScheduledTask -TaskName "usajobs-monitor" -Action $action -Trigger $tri
 
 The task picks up the user environment variables you set in steps 3 and 6, and runs as you, so it can also read credentials saved with `usajobs-monitor credentials set`.
 
+### Docker
+
+The repository includes a `Dockerfile` and a `compose.example.yaml`. The image has a small built-in scheduler, so one long-running container searches and delivers on the days and times you pick, with no cron on the host.
+
+1. **Build the image and make a data folder.** Profiles, reports, history and your decisions file live in `./data`, which the container sees as `/data`. The container runs as user 1000, so on Linux give that user the folder (Docker Desktop on macOS and Windows doesn't need this):
+
+   ```bash
+   git clone https://github.com/amv2/usajobs-monitor.git
+   cd usajobs-monitor
+   cp compose.example.yaml compose.yaml
+   mkdir -p data/profiles && sudo chown -R 1000:1000 data
+   docker compose build
+   ```
+
+   Or skip the `chown` and run the container as yourself: add `user: "UID:GID"` to the service in `compose.yaml`, using the numbers from `id -u` and `id -g`.
+
+2. **Add your credentials** to a `.env` file next to `compose.yaml`, one `NAME=value` per line: `USAJOBS_EMAIL` and `USAJOBS_API_KEY`, plus the delivery secrets from [step 6](#6-get-results-delivered) for the channels you use. Protect it with `chmod 600 .env`. There's no keychain in a container, so the image only reads environment variables. `compose.yaml`, `.env` and `data/` are in `.gitignore`.
+
+3. **Create a profile** with the wizard:
+
+   ```bash
+   docker compose run --rm usajobs-monitor init --profile me
+   ```
+
+   It's saved as `data/profiles/me.toml`, with its reports in `data/profiles/me/`. Edit it with any editor on the host. Every other command works the same way, for example `docker compose run --rm usajobs-monitor run --all --preview-delivery` or `docker compose run --rm usajobs-monitor decide 812345600 applied`.
+
+4. **Start it:**
+
+   ```bash
+   docker compose up -d
+   docker compose logs -f     # shows the next run time and each run's result
+   ```
+
+The schedule is set with environment variables in `compose.yaml`:
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `TZ` | `UTC` | Time zone for the schedule, e.g. `America/New_York` |
+| `USAJOBS_SCHEDULE_DAYS` | `Mon,Wed,Fri` | Days to run: names, a range like `mon-fri`, `weekdays` or `daily` |
+| `USAJOBS_SCHEDULE_TIMES` | `07:00` | 24-hour times, comma-separated, e.g. `07:00,17:00` |
+| `USAJOBS_SCHEDULE_ARGS` | `run --all` | The command for each run, e.g. `run --profile me` |
+| `USAJOBS_RUN_ON_START` | `0` | `1` also runs once when the container starts |
+
+A failed run is logged and the schedule carries on; the run itself sends the usual failure notice. If the container is stopped at a scheduled time, that run is skipped rather than made up later. To use the optional AI or MCP extras, build with `docker compose build --build-arg EXTRAS=ai,mcp`.
+
+If you'd rather keep cron on the host, skip the scheduler and run one-off containers instead:
+
+```cron
+0 7 * * 1,3,5  cd /home/you/usajobs-monitor && docker compose run --rm usajobs-monitor run --all >> cron.log 2>&1
+```
+
 ### GitHub Actions
 
 No computer to leave on? GitHub can run the monitor on its own servers. The repository includes a workflow, [`.github/workflows/usajobs-monitor.yml`](.github/workflows/usajobs-monitor.yml), that searches and delivers on a schedule, and you can also start it by hand. A run takes a few minutes, well inside the free Actions minutes a private repository gets each month.
@@ -583,6 +636,7 @@ Good habits:
 | 3b | GitHub Actions workflow, optional OS keychain secrets via `keyring` | Done |
 | 4 | `init` wizard, applicant-type presets, multiple profiles, `decide` command, HTML/CSV outputs | Done |
 | 5 | Optional AI add-on: résumé fit notes and an MCP server. The core never requires AI. | Done |
+| 6 | Docker image and compose example with a built-in scheduler | Done |
 
 ## Contributing
 

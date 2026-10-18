@@ -1,0 +1,9 @@
+# Keep personal data, secrets and build leftovers out of the image.
+*
+!pyproject.toml
+!README.md
+!LICENSE
+!src/
+!docker/
+**/__pycache__
+**/*.egg-info
