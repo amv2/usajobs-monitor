@@ -501,7 +501,7 @@ Everything above works without AI. This section adds two optional pieces.
 
 ### Resume fit notes
 
-For each match (and watch-list job, by default), a model reads the posting's qualifications, duties and specialized experience statement next to your resume and writes a short note: a fit level (strong, possible, stretch or unlikely), the resume evidence for it, gaps, wording to change so an HR specialist gives you credit, and anything to confirm before applying. Notes land in `usajobs_fit_notes.md` next to the other reports.
+For each match (and watch-list job, by default), a model reads the posting's qualifications, duties and specialized experience statement next to your resume and writes a short note: each required qualification marked met, unclear or not shown on resume with the resume evidence, a fit level (strong, possible, stretch or unlikely) that never runs ahead of that checklist (one requirement not shown caps it at stretch, two or more at unlikely, an unclear one at possible), gaps, wording to change so an HR specialist gives you credit, and anything to confirm before applying. Notes land in `usajobs_fit_notes.md`, and the fit level also shows on each job in the reports and alerts, with an "AI gaps" line naming what the resume doesn't show. When the checklist lowered the AI's own level, the reports say so, for example "Stretch (AI said Possible)". "Not shown on resume" often means a wording gap rather than missing experience, so check those against what you've actually done.
 
 ```bash
 pip install -e ".[ai]"                       # Claude API client, plus PDF resume reading
@@ -512,16 +512,19 @@ Get an API key from the [Claude Console](https://platform.claude.com/). Then add
 
 ```toml
 [ai]
-resume      = "resume.md"   # .md, .txt, .docx or .pdf; relative to this file
+resume      = "resume.md"   # .md, .txt, .docx or .pdf, or a folder of versions; relative to this file
 send_resume = true          # required: without it your resume never leaves your computer
 fit_notes   = true          # add notes to every run
+# rank     = true                        # list stronger fits first (nothing is hidden)
 # lists    = ["matches", "watch_list"]   # also "near_misses"
 # max_jobs = 10                          # at most this many postings per run
 # model    = "claude-opus-5-5"
 # effort   = "medium"                    # low, medium, high, xhigh or max
 ```
 
-Notes are cached by posting, resume and model, so a run three times a week pays only for postings it hasn't reviewed yet. Changing your resume refreshes them. A failed note never fails the run: the reports still publish, and the reason is in the run summary.
+With `rank = true`, each list is sorted by fit level: strong, possible, then postings without a note, then stretch and unlikely. Nothing is dropped, so a wrong "unlikely" only moves a job down. The AI judges the minimum qualifications from your resume, not how the assessment questionnaire will place you.
+
+Notes are cached by posting, resume and model, so a run three times a week pays only for postings it hasn't reviewed yet. Changing your resume refreshes them. With several resume versions (a folder), each posting is judged by the version that fits it best, and the reports name it, for example "Strong (resume: Budget Director)". Every version goes into each prompt, ahead of the posting, so with the `anthropic` provider the resumes are cached after the first posting of a run and later postings read them at a fraction of the price. A folder you keep adding tailored copies to is fine: past 5 versions, the 5 most recently changed are used. Adding or editing a resume re-rates cached postings once. A failed note never fails the run: the reports still publish, and the reason is in the run summary.
 
 To check one posting first, or to see exactly what would be sent:
 
@@ -533,6 +536,18 @@ usajobs-monitor fit 812345600             # sends it and prints the note
 **Privacy.** Your resume is read on your computer. It goes to the provider only when `ai.send_resume = true`, and only with postings from your own search. With the default provider that's Anthropic's API, under your API account's [data terms](https://www.anthropic.com/legal/commercial-terms). The posting and resume are passed to the model as data with instructions to ignore any instructions inside them. Fit notes are written by a model, so read the announcement before you rely on them.
 
 **Other models.** Set `ai.provider = "command"` and `ai.command = ["ollama", "run", "llama3.1"]` (or any program) to keep everything on your computer: the prompt goes to the program's standard input, and it must print the JSON answer. You can also point `ai.provider` at your own Python factory, `"my_package.my_module:make_provider"`; see [`fit.py`](src/usajobs_monitor/fit.py) for the interface.
+
+**Claude Code on your subscription.** To use your Claude plan instead of an API key, point the command provider at the Claude Code command line, with its tools turned off:
+
+```toml
+[ai]
+provider = "command"
+command  = ["/full/path/to/claude", "-p", "--tools", "", "--strict-mcp-config",
+            "--disable-slash-commands", "--no-session-persistence"]
+# add "--model", "claude-sonnet-5-5" to choose a model; ai.model is ignored here
+```
+
+Keep those flags. A plain `claude -p` can run shell commands, edit files and use your MCP servers (with no prompts at all if your Claude Code settings allow that), and the prompt it gets includes job posting text from the internet. `--tools ""` and `--strict-mcp-config` leave it nothing to act with, and `--no-session-persistence` stops Claude Code from saving a transcript, with your resume in it, for every posting. `check-config` warns when a `claude` command is missing them.
 
 **A profile can't run code by itself.** Both of those run code on your computer, so a profile that names one is refused until you also allow it outside the file, in the environment, with the exact command line or factory path: `export USAJOBS_ALLOW_AI_PROVIDER='ollama run llama3.1'` (comma-separate several). `check-config` prints the value to set. The whole command line must match, so allowing `python3 my_model.py` doesn't let another profile run `python3 -c ...`. This way a profile someone shares with you can't start a program or import code just because you ran it. Read any shared profile's `[ai]` table before you allow it.
 

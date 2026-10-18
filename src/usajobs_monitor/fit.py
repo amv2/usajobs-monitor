@@ -45,15 +45,17 @@ from .jobs import (
     salary_display,
 )
 from .config import ai_provider_allowed, ai_provider_hint
-from .resume_text import ResumeError, find_resume, read_resume
+from .resume_text import MAX_RESUMES, ResumeError, pick_resumes, read_resumes, resume_names
 from .review import ReviewResult
+from .tracking import FIT_LABELS, FIT_RANK
 
 FIT_NOTES_NAME = "usajobs_fit_notes.md"
 FIT_CACHE_NAME = "usajobs_fit_notes_cache.json"
-PROMPT_VERSION = 1
+PROMPT_VERSION = 3
 CACHE_KEEP_DAYS = 45
 FIELD_CHARS = 6000
 FIT_LEVELS = ("strong", "possible", "stretch", "unlikely")
+REQUIREMENT_STATUSES = ("met", "unclear", "missing")
 # Models that take the server-side refusal fallback (``fallbacks: "default"``).
 FALLBACK_MODELS = {"claude-opus-5-5", "claude-opus-5", "claude-fable-5-1", "claude-sonnet-5-5"}
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
@@ -63,12 +65,26 @@ FIT_SCHEMA: dict[str, Any] = {
     "properties": {
         "fit": {"type": "string", "enum": list(FIT_LEVELS)},
         "summary": {"type": "string"},
+        "resume_used": {"type": "string"},
+        "requirements": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "requirement": {"type": "string"},
+                    "status": {"type": "string", "enum": list(REQUIREMENT_STATUSES)},
+                    "evidence": {"type": "string"},
+                },
+                "required": ["requirement", "status", "evidence"],
+                "additionalProperties": False,
+            },
+        },
         "strengths": {"type": "array", "items": {"type": "string"}},
         "gaps": {"type": "array", "items": {"type": "string"}},
         "resume_tips": {"type": "array", "items": {"type": "string"}},
         "questions_to_verify": {"type": "array", "items": {"type": "string"}},
     },
-    "required": ["fit", "summary", "strengths", "gaps", "resume_tips", "questions_to_verify"],
+    "required": ["fit", "summary", "resume_used", "requirements", "strengths", "gaps", "resume_tips", "questions_to_verify"],
     "additionalProperties": False,
 }
 
@@ -82,6 +98,17 @@ selective factors, and the main duties. Ground every strength and gap in specifi
 assume experience the resume does not show. Federal HR specialists screen resumes literally, so note where \
 experience exists but is not stated in the posting's terms, and where a federal resume would need dates, \
 hours per week, grade or series to get credit.
+
+The resume may come as several versions, each in a <resume_version name="..."> block. They are the same \
+person's resume written for different kinds of jobs: judge the posting with the one version that fits it \
+best, put that version's name exactly in resume_used, and draw strengths, gaps and evidence from it. With a \
+single resume, leave resume_used empty.
+
+List each required qualification in requirements: the specialized experience statement, any required \
+education, certification or license, and each selective factor, in the posting's own words, shortened. Leave \
+out preferred or desirable qualifications. Mark each "met" when the resume plainly shows it, "unclear" when \
+it might be there but is not stated in the posting's terms, or "missing" when the resume does not show it; \
+evidence quotes or closely paraphrases the resume wording, or says what is absent.
 
 Fit levels: "strong" means the resume plainly shows the specialized experience; "possible" means it likely \
 qualifies with clearer wording; "stretch" means important requirements are thin or missing; "unlikely" \
@@ -124,8 +151,18 @@ class AnthropicProvider:
         self.model = model
         self.effort = effort
         self.label = f"anthropic {model}"
+        self.cache_read_tokens = 0
 
     def complete(self, system: str, prompt: str) -> str:
+        return self._send(system, prompt)
+
+    def complete_parts(self, system: str, stable: str, varying: str) -> str:
+        """``stable`` (the resumes) is the same for every posting in a run, so it is
+        marked for prompt caching: later postings read it from the cache cheaply."""
+        return self._send(system, [{"type": "text", "text": stable, "cache_control": {"type": "ephemeral"}},
+                                   {"type": "text", "text": varying}])
+
+    def _send(self, system: str, content: Any) -> str:
         anthropic = self._anthropic
         extra: dict[str, Any] = {}
         if self.model in FALLBACK_MODELS:
@@ -135,7 +172,7 @@ class AnthropicProvider:
                 model=self.model,
                 max_tokens=16000,
                 system=system,
-                messages=[{"role": "user", "content": prompt}],
+                messages=[{"role": "user", "content": content}],
                 output_config={"effort": self.effort, "format": {"type": "json_schema", "schema": FIT_SCHEMA}},
                 **extra,
             )
@@ -151,6 +188,8 @@ class AnthropicProvider:
             raise FitError(f"the Claude API returned HTTP {exc.status_code}") from None
         except anthropic.APIConnectionError:
             raise FitError("could not reach the Claude API", fatal=True) from None
+        cached = getattr(getattr(response, "usage", None), "cache_read_input_tokens", 0)
+        self.cache_read_tokens += cached if isinstance(cached, int) else 0
         if response.stop_reason == "refusal":
             raise FitError("the model declined to review this posting")
         if response.stop_reason == "max_tokens":
@@ -246,13 +285,20 @@ def posting_text(result: ReviewResult, tier: str = "") -> str:
     return "\n".join(lines)
 
 
+def prompt_parts(result: ReviewResult, resume: str, tier: str = "") -> tuple[str, str]:
+    """``(stable, varying)``: the resume first, identical for every posting in a run
+    so providers can cache it, then the posting."""
+    return (f"<resume>\n{resume}\n</resume>\n\n",
+            f"<posting>\n{posting_text(result, tier)}\n</posting>\n\nCompare the resume with the posting.")
+
+
 def build_prompt(result: ReviewResult, resume: str, tier: str = "") -> str:
-    return (f"<posting>\n{posting_text(result, tier)}\n</posting>\n\n<resume>\n{resume}\n</resume>\n\n"
-            "Compare the resume with the posting.")
+    return "".join(prompt_parts(result, resume, tier))
 
 
-def parse_fit(text: str) -> dict[str, Any]:
-    """The provider's JSON answer, checked against FIT_SCHEMA's shape."""
+def parse_fit(text: str, resume_names: list[str] | None = None) -> dict[str, Any]:
+    """The provider's JSON answer, checked against FIT_SCHEMA's shape. ``resume_used``
+    is kept only when it names one of ``resume_names``."""
     start, end = text.find("{"), text.rfind("}")
     try:
         data = json.loads(text[start:end + 1]) if start != -1 and end > start else None
@@ -263,15 +309,43 @@ def parse_fit(text: str) -> dict[str, Any]:
     fit = str(data.get("fit") or "").strip().lower()
     if fit not in FIT_LEVELS:
         raise FitError("the AI provider's answer has no valid fit level")
-    note: dict[str, Any] = {"fit": fit, "summary": str(data.get("summary") or "").strip()}
+    raw = data.get("requirements")
+    requirements = []
+    for item in raw if isinstance(raw, list) else []:
+        if isinstance(item, dict) and str(item.get("status") or "").strip().lower() in REQUIREMENT_STATUSES:
+            requirements.append({"requirement": str(item.get("requirement") or "").strip(),
+                                 "status": str(item["status"]).strip().lower(),
+                                 "evidence": str(item.get("evidence") or "").strip()})
+    note: dict[str, Any] = {"fit": capped_fit(fit, requirements), "summary": str(data.get("summary") or "").strip(),
+                            "requirements": requirements[:8]}
+    # The AI's own level, kept when the checklist lowered it, so the reports can say why.
+    note["ai_fit"] = fit if note["fit"] != fit else ""
+    used = str(data.get("resume_used") or "").strip()
+    note["resume_used"] = used if used in (resume_names or []) else ""
     for key in ("strengths", "gaps", "resume_tips", "questions_to_verify"):
         items = data.get(key) or []
         note[key] = [str(item).strip() for item in items if str(item).strip()][:8] if isinstance(items, list) else []
     return note
 
 
-def fit_note(result: ReviewResult, resume: str, provider: Provider, tier: str = "") -> dict[str, Any]:
-    return parse_fit(provider.complete(SYSTEM_PROMPT, build_prompt(result, resume, tier)))
+def capped_fit(fit: str, requirements: list[dict[str, str]]) -> str:
+    """The model's level, lowered to what its own requirement checklist supports:
+    one requirement not shown on the resume means at best "stretch", two or more
+    "unlikely", an unclear one at best "possible". "Missing" means the resume does
+    not show it, which is often a wording gap, so a single one stops at "stretch"."""
+    statuses = [item["status"] for item in requirements]
+    missing = statuses.count("missing")
+    cap = ("unlikely" if missing >= 2 else "stretch" if missing else
+           "possible" if "unclear" in statuses else "strong")
+    return max(fit, cap, key=FIT_LEVELS.index)
+
+
+def fit_note(result: ReviewResult, resume: str, provider: Provider, tier: str = "",
+             resume_names: list[str] | None = None) -> dict[str, Any]:
+    stable, varying = prompt_parts(result, resume, tier)
+    answer = (provider.complete_parts(SYSTEM_PROMPT, stable, varying) if isinstance(provider, AnthropicProvider)
+              else provider.complete(SYSTEM_PROMPT, stable + varying))
+    return parse_fit(answer, resume_names)
 
 
 def cache_key(number: str, resume: str, label: str) -> str:
@@ -319,7 +393,9 @@ def run_fit_notes(settings: Any, view: Any, output_dir: Path, today: date,
     if not picked:
         return {"status": "ok", "notes": 0, "from_cache": 0, "failed": 0}
     try:
-        resume = read_resume(find_resume(settings.ai_resume, settings.resume_folder))
+        paths, left_out = pick_resumes(settings.ai_resume, settings.resume_folder)
+        resume = read_resumes(paths)
+        names = resume_names(paths) if len(paths) > 1 else []
         provider = provider or make_provider(ai)
     except (ResumeError, FitError) as exc:
         return {"status": "error", "message": str(exc)}
@@ -339,7 +415,7 @@ def run_fit_notes(settings: Any, view: Any, output_dir: Path, today: date,
             from_cache += 1
         else:
             try:
-                note = {**fit_note(result, resume, provider, tier), "generated_on": today.isoformat(),
+                note = {**fit_note(result, resume, provider, tier, names), "generated_on": today.isoformat(),
                         "provider": label}
             except FitError as exc:
                 failures.append(f"{number}: {exc}")
@@ -350,10 +426,21 @@ def run_fit_notes(settings: Any, view: Any, output_dir: Path, today: date,
                 failures.append(f"{number}: fit note failed ({type(exc).__name__})")
                 continue
             cache[key] = note
+        view.fits[number] = note["fit"]
+        if note.get("resume_used"):
+            view.fit_resumes[number] = note["resume_used"]
+        if note.get("summary"):
+            view.fit_summaries[number] = note["summary"]
+        if gap_text(note):
+            view.fit_gaps[number] = gap_text(note)
+        if note.get("ai_fit"):
+            view.fit_lowered[number] = note["ai_fit"]
         notes.append({**note, "tier": tier, "control_number": number, "url": job_url(result.job),
                       "title": str(result.job.get("PositionTitle") or ""),
                       "agency": str(result.job.get("OrganizationName") or "")})
 
+    if ai.get("rank"):
+        notes.sort(key=lambda note: FIT_RANK[note["fit"]])  # stable: best first, as in the reports
     (output_dir / FIT_CACHE_NAME).write_text(json.dumps({"version": 1, "entries": cache}, indent=2, sort_keys=True),
                                              encoding="utf-8")
     title = settings.config.get("report", {}).get("title") or "USAJOBS"
@@ -361,16 +448,48 @@ def run_fit_notes(settings: Any, view: Any, output_dir: Path, today: date,
     status = "ok" if not failures else ("partial" if notes else "error")
     outcome: dict[str, Any] = {"status": status, "notes": len(notes), "from_cache": from_cache,
                                "failed": len(failures), "file": FIT_NOTES_NAME}
+    if isinstance(provider, AnthropicProvider) and provider.cache_read_tokens:
+        outcome["cache_read_tokens"] = provider.cache_read_tokens
     if failures:
         outcome["message"] = failures[0].partition(": ")[2]
+    elif left_out:
+        outcome["message"] = (f"used the {MAX_RESUMES} most recently changed resumes; {left_out} older "
+                              f"{'one was' if left_out == 1 else 'ones were'} left out")
     return outcome
 
 
-FIT_LABELS = {"strong": "Strong fit", "possible": "Possible fit", "stretch": "Stretch", "unlikely": "Unlikely fit"}
+REQUIREMENT_LABELS = {"met": "Met", "unclear": "Unclear", "missing": "Not shown on resume"}
+
+
+def gap_text(note: Mapping[str, Any]) -> str:
+    """The requirements the resume does not show or shows unclearly, in one line,
+    for the reports. Empty when everything was met."""
+    parts = []
+    for status in ("missing", "unclear"):
+        items = [item["requirement"] for item in note.get("requirements") or [] if item["status"] == status]
+        if items:
+            parts.append(f"{REQUIREMENT_LABELS[status]}: {'; '.join(items)}")
+    return ". ".join(parts)
+
+
+def lowered_text(note: Mapping[str, Any]) -> str:
+    """Why the checklist lowered the AI's own level, or empty when it did not."""
+    if not note.get("ai_fit"):
+        return ""
+    return f"AI said {FIT_LABELS.get(note['ai_fit'], note['ai_fit'])}; lowered by the requirement checklist"
 
 
 def render_note(note: Mapping[str, Any]) -> str:
-    lines = [f"**{FIT_LABELS.get(note['fit'], note['fit'])}.** {note['summary']}".rstrip()]
+    lowered = lowered_text(note)
+    lines = [f"**Fit: {FIT_LABELS.get(note['fit'], note['fit'])}.**" + (f" ({lowered}.)" if lowered else "")
+             + f" {note['summary']}".rstrip()]
+    if note.get("resume_used"):
+        lines += ["", f"Best resume for this posting: {note['resume_used']}"]
+    if note.get("requirements"):
+        lines += ["", "Requirements:"]
+        for item in note["requirements"]:
+            evidence = f" ({item['evidence']})" if item.get("evidence") else ""
+            lines.append(f"- {REQUIREMENT_LABELS.get(item['status'], item['status'])}: {item['requirement']}{evidence}")
     for key, heading in (("strengths", "Strengths"), ("gaps", "Gaps"), ("resume_tips", "Resume tips"),
                          ("questions_to_verify", "Check before applying")):
         if note.get(key):

@@ -5,7 +5,7 @@ from __future__ import annotations
 import csv
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -19,6 +19,10 @@ DECISION_STATUSES = {"applied", "not_interested", "watching"}
 CLOSING_SOON_DAYS = 3
 HISTORY_KEEP_DAYS = 45
 NEAR_MISS_LIMIT = 15
+FIT_LABELS = {"strong": "Strong", "possible": "Possible", "stretch": "Stretch", "unlikely": "Unlikely"}
+# Ranking order: postings the AI did not rate sit between "possible" and "stretch",
+# so a missing note neither lifts a posting nor buries it.
+FIT_RANK = {"strong": 0, "possible": 1, "": 2, "stretch": 3, "unlikely": 4}
 
 
 def near_misses(results: list[ReviewResult], limit: int = NEAR_MISS_LIMIT) -> list[ReviewResult]:
@@ -189,6 +193,41 @@ class RunView:
     baseline: bool
     history: dict[str, Any]
     history_state: str = "missing"
+    # AI fit level by control number, filled in by the optional fit notes.
+    fits: dict[str, str] = field(default_factory=dict)
+    # With several resume versions, the one the AI judged each posting by.
+    fit_resumes: dict[str, str] = field(default_factory=dict)
+    # The AI's two- or three-sentence summary, for the Word and HTML reports.
+    fit_summaries: dict[str, str] = field(default_factory=dict)
+    # Requirements the resume does not show or shows unclearly, as one line.
+    fit_gaps: dict[str, str] = field(default_factory=dict)
+    # The AI's own level when its requirement checklist lowered it.
+    fit_lowered: dict[str, str] = field(default_factory=dict)
+
+    def fit_text(self, result: ReviewResult) -> str:
+        number = job_id(result.job)
+        label = FIT_LABELS.get(self.fits.get(number, ""), "")
+        if not label:
+            return ""
+        notes = []
+        if self.fit_lowered.get(number):
+            notes.append(f"AI said {FIT_LABELS.get(self.fit_lowered[number], self.fit_lowered[number])}")
+        if self.fit_resumes.get(number):
+            notes.append(f"resume: {self.fit_resumes[number]}")
+        return f"{label} ({'; '.join(notes)})" if notes else label
+
+    def fit_gap_text(self, result: ReviewResult) -> str:
+        return self.fit_gaps.get(job_id(result.job), "")
+
+    def rank_by_fit(self) -> None:
+        """Sort each list by AI fit level, keeping the current order within a level.
+        Nothing is removed: low fits move to the bottom of their list."""
+        def key(result: ReviewResult) -> int:
+            return FIT_RANK.get(self.fits.get(job_id(result.job), ""), FIT_RANK[""])
+
+        self.matches = sorted(self.matches, key=key)
+        self.watch = sorted(self.watch, key=key)
+        self.near = sorted(self.near, key=key)
 
     def flag_text(self, result: ReviewResult) -> str:
         return ", ".join(self.flags.get(job_id(result.job), []))

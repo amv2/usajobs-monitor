@@ -499,7 +499,7 @@ def _check_ai(check: _Checker, config: dict[str, Any]) -> None:
                     + str(ai.get("api_key_env") or DEFAULT_AI_KEY_ENV))
         del ai["api_key"]
     check.unknown(ai, path, {"provider", "model", "effort", "api_key_env", "command", "resume", "send_resume",
-                             "fit_notes", "lists", "max_jobs", "timeout_seconds"})
+                             "fit_notes", "rank", "lists", "max_jobs", "timeout_seconds"})
     check.string(ai, "provider", path, "anthropic")
     provider = ai.get("provider")
     if isinstance(provider, str) and provider not in AI_PROVIDERS and not re.fullmatch(AI_PROVIDER_PATH, provider):
@@ -515,6 +515,7 @@ def _check_ai(check: _Checker, config: dict[str, Any]) -> None:
     check.string(ai, "resume", path, "")
     check.boolean(ai, "send_resume", path, False)
     check.boolean(ai, "fit_notes", path, False)
+    check.boolean(ai, "rank", path, False)
     check.strings(ai, "lists", path, ["matches", "watch_list"])
     for index, name in enumerate(ai.get("lists") or []):
         if isinstance(name, str) and name not in AI_LISTS:
@@ -526,9 +527,32 @@ def _check_ai(check: _Checker, config: dict[str, Any]) -> None:
             check.error(f"ai.{key}", f"expected {low} to {high}")
     if isinstance(provider, str) and provider != "anthropic" and not ai_provider_allowed(ai, os.environ):
         check.warnings.append(ai_provider_hint(ai) + "; until then fit notes and fit are refused")
+    if provider == "command":
+        check.warnings += claude_command_warnings([str(part) for part in ai.get("command") or []])
     if ai.get("fit_notes") is True and ai.get("send_resume") is not True:
         check.warnings.append("ai.fit_notes: needs ai.send_resume = true before your resume is sent to the "
                               "AI provider; runs skip fit notes until then")
+    if ai.get("rank") is True and ai.get("fit_notes") is not True:
+        check.warnings.append("ai.rank: needs ai.fit_notes = true; lists keep their usual order until then")
+
+
+CLAUDE_SAFE_FLAGS = ("--tools", "--strict-mcp-config", "--no-session-persistence")
+
+
+def claude_command_warnings(command: list[str]) -> list[str]:
+    """Claude Code as the command provider: without these flags it can run tools on
+    this computer while reading posting text from the internet, and it saves a
+    transcript (with the resume) for every posting."""
+    if not command or Path(command[0]).name.lower() not in ("claude", "claude.exe"):
+        return []
+    missing = [flag for flag in CLAUDE_SAFE_FLAGS if flag not in command]
+    if "--tools" in command and command[command.index("--tools") + 1:command.index("--tools") + 2] != [""]:
+        missing.insert(0, '--tools ""')
+    if not missing:
+        return []
+    return ["ai.command runs Claude Code without " + ", ".join(missing) + '; add "--tools", "", '
+            '"--strict-mcp-config", "--no-session-persistence" so it gets no tools or MCP servers and saves '
+            "no transcripts (see the README)"]
 
 
 def ai_provider_allowance(ai: Mapping[str, Any]) -> str:

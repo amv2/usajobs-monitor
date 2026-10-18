@@ -142,7 +142,7 @@ class RunIntegrationTests(unittest.TestCase):
         self.assertEqual(code, 0)
         summary = json.loads((settings.reports_dir / runner.SUMMARY).read_text())
         self.assertEqual(summary["fit_notes"]["status"], "ok")
-        self.assertIn("**Strong fit.**", (settings.reports_dir / fit.FIT_NOTES_NAME).read_text())
+        self.assertIn("**Fit: Strong.**", (settings.reports_dir / fit.FIT_NOTES_NAME).read_text())
         self.assertTrue((settings.reports_dir / fit.FIT_CACHE_NAME).is_file())
 
     def test_fit_failure_never_fails_the_run(self):
@@ -204,7 +204,7 @@ class FitCommandTests(unittest.TestCase):
         with mock.patch.object(fit, "make_provider", return_value=provider):
             code, out, _ = self.run_cli({"send_resume": True})
         self.assertEqual(code, 0)
-        self.assertIn("**Stretch.** Thin.", out)
+        self.assertIn("**Fit: Stretch.** Thin.", out)
         self.assertIn("- No formulation", out)
 
 

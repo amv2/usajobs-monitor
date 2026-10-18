@@ -218,15 +218,16 @@ Off unless you set `fit_notes = true` or run `usajobs-monitor fit`. Needs `pip i
 | Key | Default | Meaning |
 |---|---|---|
 | `fit_notes` | `false` | Write `usajobs_fit_notes.md` with each run. |
+| `rank` | `false` | With `fit_notes`, sort each list by fit level (strong, possible, not rated, stretch, unlikely), keeping the usual order within a level. Nothing is hidden. |
 | `send_resume` | `false` | Must be `true` before your resume text goes to the provider. Without it, runs skip fit notes and `fit` only previews. |
-| `resume` | `""` | Your resume: `.md`, `.txt`, `.docx` or `.pdf` (relative paths are from this file). Empty uses the only resume in `paths.resume_folder`. |
+| `resume` | `""` | Your resume: `.md`, `.txt`, `.docx` or `.pdf` (relative paths are from this file), or a folder of versions of it (the top level only; with more than 5, the 5 most recently changed are used and the run says how many were left out). Empty uses the resumes in `paths.resume_folder`. With several, the AI judges each posting by the version that fits it best and names it next to the fit level. |
 | `provider` | `"anthropic"` | `"anthropic"` (Claude API), `"command"` (a local program), or `"package.module:factory"` for your own provider. The last two run code, so they also need `USAJOBS_ALLOW_AI_PROVIDER` in the environment set to the exact command line (for example `ollama run llama3.1`) or the factory path; a profile alone can't turn them on, and `check-config` prints the value to set. |
 | `model` | `"claude-opus-5-5"` | Claude model for the `anthropic` provider. |
 | `effort` | `"medium"` | `low`, `medium`, `high`, `xhigh` or `max`. Higher is more thorough and costs more. |
 | `api_key_env` | `"ANTHROPIC_API_KEY"` | The variable (or keychain entry) holding the API key. A key in the file is an error. |
 | `command` | `[]` | For `provider = "command"`: the program and its arguments. It gets the prompt on standard input and must print the JSON answer. |
 | `lists` | `["matches", "watch_list"]` | Which lists get notes; `"near_misses"` is also allowed. |
-| `max_jobs` | `10` | At most this many postings per run (1–50), best first. |
+| `max_jobs` | `10` | At most this many postings per run (1–50), best first. With `rank`, set it at least as high as your usual match count so every match gets rated. |
 | `timeout_seconds` | `120` | Per posting (5–900). |
 
 Notes are cached in `usajobs_fit_notes_cache.json` in `paths.reports_dir` for 45 days, keyed by posting, resume text and model, so unchanged postings cost nothing on later runs. A failed note is reported in `fit_notes` and `search_warnings` in `usajobs_last_run.json` and never fails the run.

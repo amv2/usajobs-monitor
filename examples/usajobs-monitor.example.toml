@@ -128,3 +128,4 @@ formats = ["html", "csv"]   # also "docx" (Word briefing) and "xlsx" (Excel trac
 # resume      = "resume.md"   # .md, .txt, .docx or .pdf
 # send_resume = true
 # fit_notes   = true
+# rank        = true          # stronger fits first; nothing is hidden

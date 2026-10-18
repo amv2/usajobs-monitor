@@ -69,9 +69,9 @@ def _ai_status(settings) -> str:
     ai = settings.config["ai"]
     if not ai["fit_notes"]:
         return "AI fit notes: off"
-    from .resume_text import ResumeError, find_resume
+    from .resume_text import ResumeError, find_resumes
     try:
-        resume = find_resume(settings.ai_resume, settings.resume_folder).name
+        resume = ", ".join(path.name for path in find_resumes(settings.ai_resume, settings.resume_folder))
     except ResumeError as exc:
         resume = f"not found ({exc})"
     provider = f"{ai['provider']} {ai['model']}" if ai["provider"] == "anthropic" else ai["provider"]
@@ -264,15 +264,15 @@ def cmd_init(args: argparse.Namespace) -> int:
 def cmd_fit(args: argparse.Namespace) -> int:
     """Fit notes for one posting, printed as Markdown."""
     from .fit import SYSTEM_PROMPT, FitError, build_prompt, fit_note, make_provider, render_note
-    from .resume_text import ResumeError, find_resume, read_resume
+    from .resume_text import ResumeError, find_resumes, read_resumes, resume_names
     from .tools import review_posting
 
     settings = load_settings(args.config)
     _print_warnings(settings.warnings)
     ai = settings.config["ai"]
     try:
-        resume_path = find_resume(args.resume or settings.ai_resume, settings.resume_folder)
-        resume = read_resume(resume_path)
+        resume_paths = find_resumes(args.resume or settings.ai_resume, settings.resume_folder)
+        resume = read_resumes(resume_paths)
         result, tier = review_posting(settings, args.control_number)
     except (ResumeError, ValueError) as exc:  # includes tools.ToolInputError
         print(f"fit: {exc}", file=sys.stderr)
@@ -283,7 +283,7 @@ def cmd_fit(args: argparse.Namespace) -> int:
     label = tier.replace("_", " ")
     if args.preview:
         print(f"Nothing was sent. This is what ai.provider = \"{ai['provider']}\" would receive "
-              f"for {resume_path.name}:\n")
+              f"for {', '.join(path.name for path in resume_paths)}:\n")
         print(f"--- system ---\n{SYSTEM_PROMPT}\n\n--- user ---\n{build_prompt(result, resume, label)}")
         return 0
     if ai["send_resume"] is not True:
@@ -291,7 +291,8 @@ def cmd_fit(args: argparse.Namespace) -> int:
               "Run with --preview to see exactly what would be sent.", file=sys.stderr)
         return 2
     try:
-        note = fit_note(result, resume, make_provider(ai), label)
+        names = resume_names(resume_paths) if len(resume_paths) > 1 else []
+        note = fit_note(result, resume, make_provider(ai), label, names)
     except FitError as exc:
         print(f"fit: {exc}", file=sys.stderr)
         return 1

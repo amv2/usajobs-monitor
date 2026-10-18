@@ -113,6 +113,16 @@ def run_search(settings: Settings, output_dir: Path, *, today: date | None = Non
         decision_warnings.append(f"Job history: {settings.history_path.name} could not be read. This run is a new "
                                  f"baseline; the file is kept as {settings.history_path.name}{UNREADABLE_SUFFIX} "
                                  "when this run publishes.")
+    # Fit notes come before the reports so their levels can show in them and, with
+    # ai.rank, reorder each list.
+    fit_notes = {"status": "off"}
+    if (config.get("ai") or {}).get("fit_notes"):
+        from .fit import run_fit_notes  # the optional AI add-on; never fails the search
+        fit_notes = run_fit_notes(settings, view, output_dir, today or date.today())
+        if config["ai"].get("rank") and view.fits:
+            view.rank_by_fit()
+            fit_notes["ranked"] = True
+    fit_warnings = [f"Fit notes: {fit_notes['message']}"] if fit_notes.get("message") else []
     files = report_files(config)
     word, excel = output_dir / WORD_NAME, output_dir / EXCEL_NAME
     if WORD_NAME in files:
@@ -124,11 +134,6 @@ def run_search(settings: Settings, output_dir: Path, *, today: date | None = Non
     if CSV_NAME in files:
         write_csv(output_dir / CSV_NAME, results, view)
     (output_dir / HISTORY).write_text(json.dumps(view.history, indent=2, sort_keys=True), encoding="utf-8")
-    fit_notes = {"status": "off"}
-    if (config.get("ai") or {}).get("fit_notes"):
-        from .fit import run_fit_notes  # the optional AI add-on; never fails the search
-        fit_notes = run_fit_notes(settings, view, output_dir, today or date.today())
-    fit_warnings = [f"Fit notes: {fit_notes['message']}"] if fit_notes.get("message") else []
 
     target_agencies = config["search"].get("target_agencies", [])
     summary = {
