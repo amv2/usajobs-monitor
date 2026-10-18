@@ -19,7 +19,7 @@ DECISION_STATUSES = {"applied", "not_interested", "watching"}
 CLOSING_SOON_DAYS = 3
 HISTORY_KEEP_DAYS = 45
 NEAR_MISS_LIMIT = 15
-FIT_LABELS = {"strong": "Strong fit", "possible": "Possible fit", "stretch": "Stretch", "unlikely": "Unlikely fit"}
+FIT_LABELS = {"strong": "Strong", "possible": "Possible", "stretch": "Stretch", "unlikely": "Unlikely"}
 # Ranking order: postings the AI did not rate sit between "possible" and "stretch",
 # so a missing note neither lifts a posting nor buries it.
 FIT_RANK = {"strong": 0, "possible": 1, "": 2, "stretch": 3, "unlikely": 4}
@@ -197,6 +197,8 @@ class RunView:
     fits: dict[str, str] = field(default_factory=dict)
     # With several resume versions, the one the AI judged each posting by.
     fit_resumes: dict[str, str] = field(default_factory=dict)
+    # The AI's two- or three-sentence summary, for the Word and HTML reports.
+    fit_summaries: dict[str, str] = field(default_factory=dict)
 
     def fit_text(self, result: ReviewResult) -> str:
         number = job_id(result.job)

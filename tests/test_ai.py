@@ -195,7 +195,7 @@ class FitNoteTests(unittest.TestCase):
         outcome = fit.run_fit_notes(settings, view, self.out, date(2026, 10, 17), provider)
         self.assertEqual((outcome["status"], outcome["notes"], outcome["from_cache"]), ("ok", 2, 0))
         notes = (self.out / fit.FIT_NOTES_NAME).read_text()
-        self.assertIn("**Possible fit.**", notes)
+        self.assertIn("**Fit: Possible.**", notes)
         self.assertIn("control number 1", notes)
         # The next run reads the published cache and makes no new calls.
         settings.reports_dir.mkdir()
@@ -267,7 +267,7 @@ class FitNoteTests(unittest.TestCase):
         view = self.view(settings, [job("1"), job("2")])
         fit.run_fit_notes(settings, view, self.out, date.today(), FakeProvider())
         self.assertEqual(view.fits, {"1": "possible", "2": "possible"})
-        self.assertEqual(view.fit_text(view.matches[0]), "Possible fit")
+        self.assertEqual(view.fit_text(view.matches[0]), "Possible")
 
     def test_best_resume_is_recorded_and_shown(self):
         folder = self.base / "resumes"
@@ -279,7 +279,7 @@ class FitNoteTests(unittest.TestCase):
         view = self.view(settings, [job("1")])
         fit.run_fit_notes(settings, view, self.out, date.today(), provider)
         self.assertIn('<resume_version name="Policy">', provider.calls[0][1])
-        self.assertEqual(view.fit_text(view.matches[0]), "Possible fit (resume: Budget)")
+        self.assertEqual(view.fit_text(view.matches[0]), "Possible (resume: Budget)")
         self.assertIn("Best resume for this posting: Budget", (self.out / fit.FIT_NOTES_NAME).read_text())
         # A name that is not one of the versions is dropped rather than shown.
         note = fit.parse_fit(json.dumps({**GOOD_ANSWER, "resume_used": "Made Up"}), ["Budget", "Policy"])
@@ -335,21 +335,21 @@ class RankedRunTests(unittest.TestCase):
         summary, out = self.run_search(rank=True)
         self.assertTrue(summary["fit_notes"]["ranked"])
         self.assertEqual([m["control_number"] for m in summary["matches"]], ["2", "3", "1"])
-        self.assertEqual([m["ai_fit"] for m in summary["matches"]], ["Strong fit", "Stretch", "Unlikely fit"])
+        self.assertEqual([m["ai_fit"] for m in summary["matches"]], ["Strong", "Stretch", "Unlikely"])
         page = (out / "usajobs_digest.html").read_text()
         self.assertLess(page.index("job/2"), page.index("job/1"))
-        self.assertIn("AI fit:</b> Strong fit", page)
+        self.assertIn("AI fit:</b> Strong. Close; say budget formulation outright.", page)
         self.assertIn("AI ranking:", page)
         import csv
         rows = list(csv.DictReader((out / "usajobs_jobs.csv").read_text(encoding="utf-8-sig").splitlines()))
         self.assertEqual({row["Control Number"]: row["AI Fit"] for row in rows},
-                         {"1": "Unlikely fit", "2": "Strong fit", "3": "Stretch"})
+                         {"1": "Unlikely", "2": "Strong", "3": "Stretch"})
 
     def test_without_rank_order_is_unchanged_but_fit_is_shown(self):
         summary, _ = self.run_search()
         self.assertNotIn("ranked", summary["fit_notes"])
         self.assertEqual([m["control_number"] for m in summary["matches"]], ["1", "2", "3"])
-        self.assertEqual(summary["matches"][1]["ai_fit"], "Strong fit")
+        self.assertEqual(summary["matches"][1]["ai_fit"], "Strong")
 
     def test_rank_config_defaults_off_and_warns_without_fit_notes(self):
         config, warnings = validate_config(BASE)

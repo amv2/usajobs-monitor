@@ -403,6 +403,8 @@ def run_fit_notes(settings: Any, view: Any, output_dir: Path, today: date,
         view.fits[number] = note["fit"]
         if note.get("resume_used"):
             view.fit_resumes[number] = note["resume_used"]
+        if note.get("summary"):
+            view.fit_summaries[number] = note["summary"]
         notes.append({**note, "tier": tier, "control_number": number, "url": job_url(result.job),
                       "title": str(result.job.get("PositionTitle") or ""),
                       "agency": str(result.job.get("OrganizationName") or "")})
@@ -423,7 +425,7 @@ REQUIREMENT_LABELS = {"met": "Met", "unclear": "Unclear", "missing": "Missing"}
 
 
 def render_note(note: Mapping[str, Any]) -> str:
-    lines = [f"**{FIT_LABELS.get(note['fit'], note['fit'])}.** {note['summary']}".rstrip()]
+    lines = [f"**Fit: {FIT_LABELS.get(note['fit'], note['fit'])}.** {note['summary']}".rstrip()]
     if note.get("resume_used"):
         lines += ["", f"Best resume for this posting: {note['resume_used']}"]
     if note.get("requirements"):

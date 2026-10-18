@@ -524,7 +524,7 @@ fit_notes   = true          # add notes to every run
 
 With `rank = true`, each list is sorted by fit level: strong, possible, then postings without a note, then stretch and unlikely. Nothing is dropped, so a wrong "unlikely" only moves a job down. The AI judges the minimum qualifications from your resume, not how the assessment questionnaire will place you.
 
-Notes are cached by posting, resume and model, so a run three times a week pays only for postings it hasn't reviewed yet. Changing your resume refreshes them. With several resume versions (a folder), each posting is judged by the version that fits it best, and the reports name it, for example "Strong fit (resume: Budget Director)". Every version goes into each prompt, so each note costs more. A failed note never fails the run: the reports still publish, and the reason is in the run summary.
+Notes are cached by posting, resume and model, so a run three times a week pays only for postings it hasn't reviewed yet. Changing your resume refreshes them. With several resume versions (a folder), each posting is judged by the version that fits it best, and the reports name it, for example "Strong (resume: Budget Director)". Every version goes into each prompt, so each note costs more. A failed note never fails the run: the reports still publish, and the reason is in the run summary.
 
 To check one posting first, or to see exactly what would be sent:
 

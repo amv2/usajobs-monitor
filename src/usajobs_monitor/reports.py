@@ -175,7 +175,8 @@ def add_job_paragraph(doc: Any, result: ReviewResult, view: RunView, *, reason: 
     if view.your_status(result):
         p.add_run(f"\nYour status: {view.your_status(result)}")
     if view.fit_text(result):
-        p.add_run(f"\nAI fit: {view.fit_text(result)} (see the fit notes)")
+        summary = view.fit_summaries.get(job_id(job), "")
+        p.add_run(f"\nAI fit: {view.fit_text(result)}" + (f". {summary}" if summary else ""))
     if reason:
         p.add_run(f"\nWhy excluded: {reason}")
     p.add_run(f"\nUSAJOBS: {job_url(job)} (control number {job_id(job)})")
@@ -465,7 +466,8 @@ def _html_job(result: ReviewResult, view: RunView, reason: str = "") -> str:
     if view.your_status(result):
         facts.append(("Your status", view.your_status(result)))
     if view.fit_text(result):
-        facts.append(("AI fit", view.fit_text(result)))
+        summary = view.fit_summaries.get(job_id(job), "")
+        facts.append(("AI fit", view.fit_text(result) + (f". {summary}" if summary else "")))
     if reason:
         facts.append(("Why excluded", reason))
     if result.eligibility_basis:
