@@ -25,6 +25,12 @@ A scheduled job search for [USAJOBS](https://www.usajobs.gov) that does the filt
 
 Output is your choice of an HTML digest (`usajobs_digest.html`), a CSV of every job reviewed (`usajobs_jobs.csv`), a Word briefing (`usajobs_briefing.docx`) and an Excel tracker (`usajobs_tracker.xlsx`), plus a `usajobs_last_run.json` summary. Profiles written by `init` use HTML and CSV; older profiles keep Word and Excel until you set [`report.formats`](docs/CONFIG_REFERENCE.md#report-and-scoring).
 
+### What a report looks like
+
+![The HTML digest from a sample run: two matches, one flagged VERIFY ELIGIBILITY, and a GS/GG-15 watch list](docs/sample/digest.png)
+
+This is the HTML digest from [a sample run](docs/sample/usajobs_digest.html) with made-up postings and agencies. [`scripts/make_sample_report.py`](scripts/make_sample_report.py) regenerates it offline.
+
 ## Requirements
 
 - Python 3.11 or newer
