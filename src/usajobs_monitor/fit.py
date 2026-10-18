@@ -15,8 +15,8 @@ Providers are swappable (``ai.provider``):
   env)`` returns an object with ``complete(system, prompt) -> str``.
 
 The last two run code on this computer, so a profile alone can't turn them on:
-``USAJOBS_ALLOW_AI_PROVIDER`` in the environment must also list the program
-(``ai.command[0]``) or the factory path. A shared profile stays data.
+``USAJOBS_ALLOW_AI_PROVIDER`` in the environment must also list the exact
+command line or factory path. A shared profile stays data.
 
 Every provider answers with the JSON object in ``FIT_SCHEMA``. Notes are cached
 by posting, resume and model, so a scheduled run pays only for new postings.

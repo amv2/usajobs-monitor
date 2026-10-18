@@ -25,6 +25,12 @@ A scheduled job search for [USAJOBS](https://www.usajobs.gov) that does the filt
 
 Output is your choice of an HTML digest (`usajobs_digest.html`), a CSV of every job reviewed (`usajobs_jobs.csv`), a Word briefing (`usajobs_briefing.docx`) and an Excel tracker (`usajobs_tracker.xlsx`), plus a `usajobs_last_run.json` summary. Profiles written by `init` use HTML and CSV; older profiles keep Word and Excel until you set [`report.formats`](docs/CONFIG_REFERENCE.md#report-and-scoring).
 
+### What a report looks like
+
+![The HTML digest from a sample run: two matches, one flagged VERIFY ELIGIBILITY, and a GS/GG-15 watch list](docs/sample/digest.png)
+
+This is the HTML digest from [a sample run](docs/sample/usajobs_digest.html) with made-up postings and agencies. [`scripts/make_sample_report.py`](scripts/make_sample_report.py) regenerates it offline.
+
 ## Requirements
 
 - Python 3.11 or newer
@@ -475,7 +481,7 @@ usajobs-monitor fit 812345600             # sends it and prints the note
 
 **Other models.** Set `ai.provider = "command"` and `ai.command = ["ollama", "run", "llama3.1"]` (or any program) to keep everything on your computer: the prompt goes to the program's standard input, and it must print the JSON answer. You can also point `ai.provider` at your own Python factory, `"my_package.my_module:make_provider"`; see [`fit.py`](src/usajobs_monitor/fit.py) for the interface.
 
-**A profile can't run code by itself.** Both of those run code on your computer, so a profile that names one is refused until you also allow it outside the file, in the environment: `export USAJOBS_ALLOW_AI_PROVIDER=ollama` (the exact `ai.command[0]`, or the exact factory path; comma-separate several). `check-config` tells you the value to set. This way a profile someone shares with you can't start a program or import code just because you ran it. Read any shared profile's `[ai]` table before you allow it.
+**A profile can't run code by itself.** Both of those run code on your computer, so a profile that names one is refused until you also allow it outside the file, in the environment, with the exact command line or factory path: `export USAJOBS_ALLOW_AI_PROVIDER='ollama run llama3.1'` (comma-separate several). `check-config` prints the value to set. The whole command line must match, so allowing `python3 my_model.py` doesn't let another profile run `python3 -c ...`. This way a profile someone shares with you can't start a program or import code just because you ran it. Read any shared profile's `[ai]` table before you allow it.
 
 ### MCP server
 

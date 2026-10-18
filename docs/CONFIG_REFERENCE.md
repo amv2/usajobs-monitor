@@ -220,7 +220,7 @@ Off unless you set `fit_notes = true` or run `usajobs-monitor fit`. Needs `pip i
 | `fit_notes` | `false` | Write `usajobs_fit_notes.md` with each run. |
 | `send_resume` | `false` | Must be `true` before your resume text goes to the provider. Without it, runs skip fit notes and `fit` only previews. |
 | `resume` | `""` | Your resume: `.md`, `.txt`, `.docx` or `.pdf` (relative paths are from this file). Empty uses the only resume in `paths.resume_folder`. |
-| `provider` | `"anthropic"` | `"anthropic"` (Claude API), `"command"` (a local program), or `"package.module:factory"` for your own provider. The last two run code, so they also need `USAJOBS_ALLOW_AI_PROVIDER` in the environment set to the program (`command[0]`) or the factory path; a profile alone can't turn them on. |
+| `provider` | `"anthropic"` | `"anthropic"` (Claude API), `"command"` (a local program), or `"package.module:factory"` for your own provider. The last two run code, so they also need `USAJOBS_ALLOW_AI_PROVIDER` in the environment set to the exact command line (for example `ollama run llama3.1`) or the factory path; a profile alone can't turn them on, and `check-config` prints the value to set. |
 | `model` | `"claude-opus-5-5"` | Claude model for the `anthropic` provider. |
 | `effort` | `"medium"` | `low`, `medium`, `high`, `xhigh` or `max`. Higher is more thorough and costs more. |
 | `api_key_env` | `"ANTHROPIC_API_KEY"` | The variable (or keychain entry) holding the API key. A key in the file is an error. |

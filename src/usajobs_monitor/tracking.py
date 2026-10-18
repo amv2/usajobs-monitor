@@ -234,7 +234,7 @@ def build_view(results: list[ReviewResult], config: dict[str, Any], history: dic
         tags = []
         if not baseline and number not in previous:
             tags.append("NEW")
-        if r.kept and needs_eligibility_check(r):
+        if needs_eligibility_check(r):
             tags.append(VERIFY_ELIGIBILITY_FLAG)
         closes = close_date(r.job)
         if closes is not None and 0 <= (closes - today).days <= CLOSING_SOON_DAYS:

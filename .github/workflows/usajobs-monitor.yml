@@ -81,7 +81,7 @@ jobs:
             cp "$STATE_DIR/usajobs_job_history.json" "$REPORTS/"
             echo "Restored job history from an earlier run."
           else
-            echo "No earlier job history; every job will show as NEW this time."
+            echo "No earlier job history: this run is a baseline, so nothing is flagged NEW until the next run."
           fi
 
       - name: Search and deliver
