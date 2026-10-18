@@ -8,6 +8,7 @@ from email.parser import BytesParser
 from pathlib import Path
 import tempfile
 import unittest
+import zipfile
 from unittest.mock import patch
 
 from usajobs_monitor import api, delivery, runner
@@ -108,6 +109,33 @@ class OutputTests(unittest.TestCase):
         code, outcome = runner.run(settings, lambda run_dir: delivery.deliver(run_dir, settings, dry_run=True))
         self.assertEqual(code, 0, outcome)
         self.assertEqual(len(delivery.validated_run(Path(outcome["run_directory"])).attachments), 4)
+
+    def test_verify_eligibility_flag_reaches_every_output(self):
+        jobs = [posting(444444444, "Budget Analyst", 150000, ("special-authorities",)),
+                posting(555555555, "Budget Analyst", 95000, ("special-authorities",))]
+        patch.object(api, "search_all_jobs", return_value=(jobs, 1, [])).start()
+        path = self.base / "profile.toml"
+        path.write_text(PROFILE.format(formats=json.dumps(["docx", "xlsx", "html", "csv"])).replace(
+            'presets = ["public"]', 'presets = ["excepted-fed"]\ninterchange_agency = "Example Agency"'))
+        settings = load_settings(path, {"USAJOBS_EMAIL": "me@example.invalid", "USAJOBS_API_KEY": "k"})
+        code, outcome = runner.run(settings, lambda run_dir: delivery.deliver(run_dir, settings, dry_run=True))
+        self.assertEqual(code, 0, outcome)
+        folder = Path(outcome["run_directory"])
+        summary = json.loads((folder / runner.SUMMARY).read_text())
+        self.assertEqual([m["control_number"] for m in summary["matches"]], ["444444444"])
+        flagged = {e["control_number"] for key in ("matches", "watch_list", "top_near_misses") for e in summary[key]
+                   if "VERIFY ELIGIBILITY" in e.get("flags", [])}
+        self.assertEqual(flagged, {"444444444", "555555555"})
+        for name in (WORD_NAME, EXCEL_NAME):
+            with zipfile.ZipFile(folder / name) as archive:
+                xml = "".join(archive.read(n).decode("utf-8") for n in archive.namelist() if n.endswith(".xml"))
+            self.assertIn("VERIFY ELIGIBILITY", xml, name)
+        for name in (HTML_NAME, CSV_NAME):
+            self.assertIn("VERIFY ELIGIBILITY", (folder / name).read_text(encoding="utf-8-sig"), name)
+        eml = next(folder.rglob("email.eml"))
+        body = BytesParser(policy=policy.default).parsebytes(eml.read_bytes()).get_body(
+            preferencelist=("plain",)).get_content()
+        self.assertIn("VERIFY ELIGIBILITY", body)
 
     def test_tampered_text_report_is_refused(self):
         settings = self.settings(["csv"])
