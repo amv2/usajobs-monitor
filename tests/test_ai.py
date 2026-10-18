@@ -167,6 +167,9 @@ class ResumeTests(unittest.TestCase):
         self.assertEqual(resume_text.resume_names([Path("Resume v1.md"), Path("Resume v2.md")]), ["v1", "v2"])
         self.assertEqual(resume_text.resume_names([Path("a.md"), Path("a.txt")]), ["a", "a"])
         self.assertEqual(resume_text.resume_names([Path("Only.md")]), ["Only"])
+        self.assertEqual(resume_text.resume_names([Path("Pat Lee - Resume - Analyst.pdf"),
+                                                   Path("Pat Lee Resume 2026 - Director.pdf")]),
+                         ["Analyst", "2026 - Director"])
 
     def test_several_resumes_are_named_versions(self):
         (self.folder / "Budget Director.md").write_text("Directed budgets.")
@@ -282,11 +285,26 @@ class FitNoteTests(unittest.TestCase):
         unclear = {**met, "status": "unclear"}
         missing = {"requirement": "CPA license", "status": "missing", "evidence": "no license listed"}
         for level, requirements, expected in (("strong", [met], "strong"), ("strong", [met, unclear], "possible"),
-                                              ("possible", [met, missing], "unlikely"),
+                                              ("possible", [met, missing], "stretch"),
+                                              ("possible", [missing, missing], "unlikely"),
+                                              ("unlikely", [met], "unlikely"),
                                               ("stretch", [met], "stretch")):
             with self.subTest(level=level, expected=expected):
                 note = fit.parse_fit(json.dumps({**GOOD_ANSWER, "fit": level, "requirements": requirements}))
                 self.assertEqual(note["fit"], expected)
+
+    def test_lowered_level_and_gaps_are_explained(self):
+        answer = {**GOOD_ANSWER, "fit": "possible", "requirements": [
+            {"requirement": "Supervising staff", "status": "missing", "evidence": "not stated"},
+            {"requirement": "Budget formulation", "status": "unclear", "evidence": "budget work, no detail"}]}
+        note = fit.parse_fit(json.dumps(answer))
+        self.assertEqual((note["fit"], note["ai_fit"]), ("stretch", "possible"))
+        self.assertEqual(fit.gap_text(note),
+                         "Not shown on resume: Supervising staff. Unclear: Budget formulation")
+        rendered = fit.render_note(note)
+        self.assertIn("**Fit: Stretch.** (AI said Possible; lowered by the requirement checklist.)", rendered)
+        self.assertIn("- Not shown on resume: Supervising staff (not stated)", rendered)
+        self.assertEqual(fit.parse_fit(json.dumps(GOOD_ANSWER))["ai_fit"], "")
 
     def test_requirements_are_kept_and_shown(self):
         answer = {**GOOD_ANSWER, "requirements": [
@@ -362,12 +380,15 @@ class RankedRunTests(unittest.TestCase):
             posting["PositionRemuneration"] = [{"MinimumRange": "90000", "MaximumRange": "150000"}]
         from usajobs_monitor import api
         mock.patch.object(api, "search_all_jobs", return_value=(jobs, 1, [])).start()
-        levels = {"1": "unlikely", "2": "strong", "3": "stretch"}
+        levels = {"1": "unlikely", "2": "strong", "3": "possible"}
+        # Job 3: the AI says possible, but one requirement is not shown, so it is lowered to stretch.
+        gap = [{"requirement": "Supervising staff", "status": "missing", "evidence": "not stated"}]
 
         class ByNumber(FakeProvider):
             def complete(self, system, prompt):
                 number = prompt.split("usajobs.gov/job/")[1][0] if "usajobs.gov/job/" in prompt else "1"
-                return json.dumps({**GOOD_ANSWER, "fit": levels[number]})
+                return json.dumps({**GOOD_ANSWER, "fit": levels[number],
+                                   "requirements": gap if number == "3" else []})
 
         mock.patch.object(fit, "make_provider", return_value=ByNumber()).start()
         mock.patch.object(fit, "posting_text", side_effect=lambda result, tier="": result.job["PositionURI"]).start()
@@ -384,18 +405,23 @@ class RankedRunTests(unittest.TestCase):
         summary, out = self.run_search(rank=True)
         self.assertTrue(summary["fit_notes"]["ranked"])
         self.assertEqual([m["control_number"] for m in summary["matches"]], ["2", "3", "1"])
-        self.assertEqual([m["ai_fit"] for m in summary["matches"]], ["Strong", "Stretch", "Unlikely"])
+        self.assertEqual([m["ai_fit"] for m in summary["matches"]],
+                         ["Strong", "Stretch (AI said Possible)", "Unlikely"])
+        self.assertEqual(summary["matches"][1]["ai_gaps"], "Not shown on resume: Supervising staff")
         page = (out / "usajobs_digest.html").read_text()
         self.assertLess(page.index("job/2"), page.index("job/1"))
         self.assertIn("AI fit:</b> Strong. Close; say budget formulation outright.", page)
         self.assertIn("AI ranking:", page)
+        self.assertIn("AI gaps:</b> Not shown on resume: Supervising staff", page)
         from docx import Document
         briefing = "\n".join(p.text for p in Document(str(out / "usajobs_briefing.docx")).paragraphs)
         self.assertIn("the AI compared your resume with 3 postings", briefing)
         import csv
         rows = list(csv.DictReader((out / "usajobs_jobs.csv").read_text(encoding="utf-8-sig").splitlines()))
         self.assertEqual({row["Control Number"]: row["AI Fit"] for row in rows},
-                         {"1": "Unlikely", "2": "Strong", "3": "Stretch"})
+                         {"1": "Unlikely", "2": "Strong", "3": "Stretch (AI said Possible)"})
+        self.assertEqual({row["Control Number"]: row["AI Gaps"] for row in rows}["3"],
+                         "Not shown on resume: Supervising staff")
 
     def test_without_rank_order_is_unchanged_but_fit_is_shown(self):
         summary, _ = self.run_search()
