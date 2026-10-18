@@ -1,0 +1,22 @@
+# Copy to compose.yaml, put your credentials in .env next to it, then:
+#   docker compose run --rm usajobs-monitor init --profile me   # first time only
+#   docker compose up -d                                        # runs on the schedule below
+#   docker compose logs -f
+#
+# Profiles, reports, history and decisions live in ./data on the host.
+services:
+  usajobs-monitor:
+    image: usajobs-monitor:latest
+    build: .
+    container_name: usajobs-monitor
+    restart: unless-stopped
+    command: ["schedule"]
+    env_file: .env        # USAJOBS_EMAIL, USAJOBS_API_KEY, and any delivery secrets
+    environment:
+      TZ: America/New_York
+      USAJOBS_SCHEDULE_DAYS: Mon,Wed,Fri
+      USAJOBS_SCHEDULE_TIMES: "07:00"
+      USAJOBS_SCHEDULE_ARGS: run --all
+      USAJOBS_RUN_ON_START: "0"
+    volumes:
+      - ./data:/data
