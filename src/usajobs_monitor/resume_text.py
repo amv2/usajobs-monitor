@@ -7,6 +7,7 @@ which the core already installs. PDF and other formats use the optional
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 TEXT_SUFFIXES = {".md", ".markdown", ".txt", ".text"}
@@ -44,17 +45,28 @@ def find_resumes(resume: Path | None, folder: Path | None) -> list[Path]:
     return candidates
 
 
-def resume_name(path: Path) -> str:
-    """How the AI and the reports name one resume version: its file name without the suffix."""
-    return path.stem
+def resume_names(paths: list[Path]) -> list[str]:
+    """Short names for several resume versions: file names without the suffix, and
+    without the words they all start with ("Pat Lee - Resume - Analyst" and
+    "Pat Lee - Resume - Director" become "Analyst" and "Director")."""
+    stems = [path.stem.replace('"', "'") for path in paths]
+    if len(stems) < 2:
+        return stems
+    shared = len(os.path.commonprefix(stems))
+    # Cut only at a separator, so a word is never split: "Resume v1" and "Resume v2"
+    # become "v1" and "v2", not "1" and "2".
+    while shared and stems[0][shared - 1] not in " -_–,.":
+        shared -= 1
+    short = [stem[shared:].strip(" -_–,.") for stem in stems]
+    return short if all(short) and len(set(short)) == len(short) else stems
 
 
 def read_resumes(paths: list[Path]) -> str:
-    """One resume as plain text, or several, each marked with its name."""
+    """One resume as plain text, or several, each marked with its short name."""
     if len(paths) == 1:
         return read_resume(paths[0])
-    return "\n\n".join(f'<resume_version name="{resume_name(path).replace(chr(34), chr(39))}">\n'
-                        f"{read_resume(path)}\n</resume_version>" for path in paths)
+    return "\n\n".join(f'<resume_version name="{name}">\n{read_resume(path)}\n</resume_version>'
+                        for name, path in zip(resume_names(paths), paths))
 
 
 def read_resume(path: Path) -> str:

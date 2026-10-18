@@ -47,7 +47,10 @@ def format_timestamp(moment: datetime) -> str:
     return f"Refreshed {moment:%B} {moment.day}, {moment.year} at {hour}:{moment:%M} {meridiem}"
 
 
-def resume_note(resumes: list[Path]) -> str:
+def resume_note(resumes: list[Path], rated: int = 0) -> str:
+    if rated:
+        return (f"Resumes: the AI compared your resume with {rated} posting{'s' if rated != 1 else ''}; "
+                "see AI fit on each job and the fit notes.")
     if not resumes:
         return "Resumes: none found in the configured folder."
     return f"Resumes: {len(resumes)} on file. They are listed for reference and are not scored against postings."
@@ -149,7 +152,7 @@ def active_filters_text(config: dict[str, Any], decisions_name: str) -> list[str
                  "applied and watching postings are flagged.")
     ai = config.get("ai") or {}
     if ai.get("rank") and ai.get("fit_notes") and ai.get("send_resume") is True:
-        lines.append("AI ranking: within each list, postings the AI rated a stronger fit for your resume come first, "
+        lines.append("AI ranking: within each list, postings the AI rated a stronger fit come first, "
                      "then unrated ones, then stretches and unlikely fits. Nothing is hidden, and the AI judges only "
                      "the minimum qualifications, not the assessment questionnaire.")
     return lines
@@ -223,7 +226,7 @@ def write_word(path: Path, results: list[ReviewResult], config: dict[str, Any], 
     summary.add_run(f"\nDropped since last run: {len(view.dropped)}")
     if view.hidden:
         summary.add_run(f"\nHidden as not interested: {len(view.hidden)}")
-    summary.add_run(f"\n{resume_note(resumes)}")
+    summary.add_run(f"\n{resume_note(resumes, len(view.fits))}")
 
     if not view.matches:
         doc.add_paragraph(
@@ -352,7 +355,7 @@ def write_excel(path: Path, results: list[ReviewResult], config: dict[str, Any],
          f"{view.new_count(view.matches)} matches, {view.new_count(view.watch)} watch list, {view.new_count(view.near)} near misses"),
         ("Dropped since last run", len(view.dropped)),
         ("Hidden as not interested", len(view.hidden)),
-        ("Resumes", resume_note(resumes)),
+        ("Resumes", resume_note(resumes, len(view.fits))),
         ("Salary rule", f"Upper salary must exceed {_money(config['filters'].get('salary_upper_must_exceed'))}"),
         *([("Pay target", target_label(config))] if target_label(config) else []),
         ("Your decisions file", str(decisions_path)),

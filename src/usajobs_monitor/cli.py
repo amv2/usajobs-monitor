@@ -264,7 +264,7 @@ def cmd_init(args: argparse.Namespace) -> int:
 def cmd_fit(args: argparse.Namespace) -> int:
     """Fit notes for one posting, printed as Markdown."""
     from .fit import SYSTEM_PROMPT, FitError, build_prompt, fit_note, make_provider, render_note
-    from .resume_text import ResumeError, find_resumes, read_resumes, resume_name
+    from .resume_text import ResumeError, find_resumes, read_resumes, resume_names
     from .tools import review_posting
 
     settings = load_settings(args.config)
@@ -291,7 +291,7 @@ def cmd_fit(args: argparse.Namespace) -> int:
               "Run with --preview to see exactly what would be sent.", file=sys.stderr)
         return 2
     try:
-        names = [resume_name(path) for path in resume_paths] if len(resume_paths) > 1 else []
+        names = resume_names(resume_paths) if len(resume_paths) > 1 else []
         note = fit_note(result, resume, make_provider(ai), label, names)
     except FitError as exc:
         print(f"fit: {exc}", file=sys.stderr)

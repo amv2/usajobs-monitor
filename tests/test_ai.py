@@ -145,6 +145,14 @@ class ResumeTests(unittest.TestCase):
             resume_text.find_resumes(None, self.folder)
         self.assertIn("set ai.resume", str(caught.exception))
 
+    def test_resume_names_drop_the_shared_start(self):
+        names = resume_text.resume_names([Path("Pat Lee - Resume - Budget Director.pdf"),
+                                          Path("Pat Lee - Resume - FDIC Analyst (18Sept2026).pdf")])
+        self.assertEqual(names, ["Budget Director", "FDIC Analyst (18Sept2026)"])
+        self.assertEqual(resume_text.resume_names([Path("Resume v1.md"), Path("Resume v2.md")]), ["v1", "v2"])
+        self.assertEqual(resume_text.resume_names([Path("a.md"), Path("a.txt")]), ["a", "a"])
+        self.assertEqual(resume_text.resume_names([Path("Only.md")]), ["Only"])
+
     def test_several_resumes_are_named_versions(self):
         (self.folder / "Budget Director.md").write_text("Directed budgets.")
         (self.folder / "Analyst.txt").write_text("Analyzed things.")
@@ -285,6 +293,19 @@ class FitNoteTests(unittest.TestCase):
         note = fit.parse_fit(json.dumps({**GOOD_ANSWER, "resume_used": "Made Up"}), ["Budget", "Policy"])
         self.assertEqual(note["resume_used"], "")
 
+    def test_ranked_notes_file_is_best_first(self):
+        settings = self.settings(rank=True)
+        answers = iter([{**GOOD_ANSWER, "fit": "unlikely", "summary": "First seen."},
+                        {**GOOD_ANSWER, "fit": "strong", "summary": "Second seen."}])
+
+        class InOrder(FakeProvider):
+            def complete(self, system, prompt):
+                return json.dumps(next(answers))
+
+        fit.run_fit_notes(settings, self.view(settings, [job("1"), job("2")]), self.out, date.today(), InOrder())
+        notes = (self.out / fit.FIT_NOTES_NAME).read_text()
+        self.assertLess(notes.index("Second seen."), notes.index("First seen."))
+
     def test_rank_by_fit_reorders_without_hiding(self):
         settings = self.settings()
         view = self.view(settings, [job("1"), job("2"), job("3"), job("4")])
@@ -340,6 +361,9 @@ class RankedRunTests(unittest.TestCase):
         self.assertLess(page.index("job/2"), page.index("job/1"))
         self.assertIn("AI fit:</b> Strong. Close; say budget formulation outright.", page)
         self.assertIn("AI ranking:", page)
+        from docx import Document
+        briefing = "\n".join(p.text for p in Document(str(out / "usajobs_briefing.docx")).paragraphs)
+        self.assertIn("the AI compared your resume with 3 postings", briefing)
         import csv
         rows = list(csv.DictReader((out / "usajobs_jobs.csv").read_text(encoding="utf-8-sig").splitlines()))
         self.assertEqual({row["Control Number"]: row["AI Fit"] for row in rows},

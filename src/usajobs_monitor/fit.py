@@ -45,9 +45,9 @@ from .jobs import (
     salary_display,
 )
 from .config import ai_provider_allowed, ai_provider_hint
-from .resume_text import ResumeError, find_resumes, read_resumes, resume_name
+from .resume_text import ResumeError, find_resumes, read_resumes, resume_names
 from .review import ReviewResult
-from .tracking import FIT_LABELS
+from .tracking import FIT_LABELS, FIT_RANK
 
 FIT_NOTES_NAME = "usajobs_fit_notes.md"
 FIT_CACHE_NAME = "usajobs_fit_notes_cache.json"
@@ -369,7 +369,7 @@ def run_fit_notes(settings: Any, view: Any, output_dir: Path, today: date,
     try:
         paths = find_resumes(settings.ai_resume, settings.resume_folder)
         resume = read_resumes(paths)
-        names = [resume_name(path) for path in paths] if len(paths) > 1 else []
+        names = resume_names(paths) if len(paths) > 1 else []
         provider = provider or make_provider(ai)
     except (ResumeError, FitError) as exc:
         return {"status": "error", "message": str(exc)}
@@ -409,6 +409,8 @@ def run_fit_notes(settings: Any, view: Any, output_dir: Path, today: date,
                       "title": str(result.job.get("PositionTitle") or ""),
                       "agency": str(result.job.get("OrganizationName") or "")})
 
+    if ai.get("rank"):
+        notes.sort(key=lambda note: FIT_RANK[note["fit"]])  # stable: best first, as in the reports
     (output_dir / FIT_CACHE_NAME).write_text(json.dumps({"version": 1, "entries": cache}, indent=2, sort_keys=True),
                                              encoding="utf-8")
     title = settings.config.get("report", {}).get("title") or "USAJOBS"
