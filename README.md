@@ -537,6 +537,18 @@ usajobs-monitor fit 812345600             # sends it and prints the note
 
 **Other models.** Set `ai.provider = "command"` and `ai.command = ["ollama", "run", "llama3.1"]` (or any program) to keep everything on your computer: the prompt goes to the program's standard input, and it must print the JSON answer. You can also point `ai.provider` at your own Python factory, `"my_package.my_module:make_provider"`; see [`fit.py`](src/usajobs_monitor/fit.py) for the interface.
 
+**Claude Code on your subscription.** To use your Claude plan instead of an API key, point the command provider at the Claude Code command line, with its tools turned off:
+
+```toml
+[ai]
+provider = "command"
+command  = ["/full/path/to/claude", "-p", "--tools", "", "--strict-mcp-config",
+            "--disable-slash-commands", "--no-session-persistence"]
+# add "--model", "claude-sonnet-5-5" to choose a model; ai.model is ignored here
+```
+
+Keep those flags. A plain `claude -p` can run shell commands, edit files and use your MCP servers (with no prompts at all if your Claude Code settings allow that), and the prompt it gets includes job posting text from the internet. `--tools ""` and `--strict-mcp-config` leave it nothing to act with, and `--no-session-persistence` stops Claude Code from saving a transcript, with your resume in it, for every posting. `check-config` warns when a `claude` command is missing them.
+
 **A profile can't run code by itself.** Both of those run code on your computer, so a profile that names one is refused until you also allow it outside the file, in the environment, with the exact command line or factory path: `export USAJOBS_ALLOW_AI_PROVIDER='ollama run llama3.1'` (comma-separate several). `check-config` prints the value to set. The whole command line must match, so allowing `python3 my_model.py` doesn't let another profile run `python3 -c ...`. This way a profile someone shares with you can't start a program or import code just because you ran it. Read any shared profile's `[ai]` table before you allow it.
 
 ### MCP server

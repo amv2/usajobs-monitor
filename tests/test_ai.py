@@ -75,6 +75,19 @@ class AiConfigTests(unittest.TestCase):
             validate_config({**BASE, "ai": {"provider": "command"}})
         self.assertIn("ai.command", str(caught.exception))
 
+    def test_claude_code_without_safe_flags_warns(self):
+        safe = ["/usr/local/bin/claude", "-p", "--tools", "", "--strict-mcp-config", "--disable-slash-commands",
+                "--no-session-persistence"]
+        _, warnings = validate_config({**BASE, "ai": {"provider": "command", "command": safe}})
+        self.assertFalse(any("Claude Code" in w for w in warnings))
+        for command in (["claude", "-p"], ["claude", "-p", "--tools", "Bash", "--strict-mcp-config",
+                                          "--no-session-persistence"]):
+            with self.subTest(command=command):
+                _, warnings = validate_config({**BASE, "ai": {"provider": "command", "command": command}})
+                self.assertTrue(any("runs Claude Code without" in w for w in warnings))
+        _, warnings = validate_config({**BASE, "ai": {"provider": "command", "command": ["ollama", "run", "x"]}})
+        self.assertFalse(any("Claude Code" in w for w in warnings))
+
     def test_custom_provider_path_accepted(self):
         config, _ = validate_config({**BASE, "ai": {"provider": "my_pkg.llm:make"}})
         self.assertEqual(config["ai"]["provider"], "my_pkg.llm:make")
