@@ -2,7 +2,7 @@
 
 A scheduled job search for [USAJOBS](https://www.usajobs.gov) that does the filtering a keyword search can't. You describe the jobs you want and the hiring paths you qualify for in one config file, and each run gives you a short list of postings worth reading, a watch list, and the near misses, with a reason for every job it set aside.
 
-> **Status:** early. The core search, filtering, tracking and reports (phase 1) are ported from a personal tool that runs three times a week, delivery by email, Discord, Slack and ntfy is in, it can run on GitHub Actions, `usajobs-monitor init` sets up a profile for you, and an optional AI add-on writes resume fit notes and serves the search to AI assistants over MCP. Features marked *(planned)* aren't in the package yet. See [Roadmap](#roadmap).
+> **Status:** early, but complete for everyday use. The core search, filtering, tracking and reports are ported from a personal tool that runs three times a week. Delivery by email, Discord, Slack and ntfy is in, it can run on GitHub Actions or in Docker, `usajobs-monitor init` sets up a profile for you, and an optional AI add-on rates your resume against each job, lists stronger fits first and serves the search to AI assistants over MCP. See [Roadmap](#roadmap) for what's next.
 
 ## What it does
 
@@ -20,7 +20,7 @@ A scheduled job search for [USAJOBS](https://www.usajobs.gov) that does the filt
 - **Remembers between runs.** Each job is flagged **NEW** the first time it appears and **CLOSING SOON** when three days or less remain, and jobs that disappeared are noted. You can record a decision (applied, not interested, watching) so a job stops nagging you.
 - **Runs safely on a schedule.** Each run works in its own folder and publishes reports only after they pass validation. A lock stops two runs from overlapping, and a failed run never overwrites the last good report or puts raw errors in anything that gets sent to you.
 - **Delivers results where you'll see them.** Email through any SMTP server with the reports attached, or a short digest to Discord, Slack or ntfy. A retry never sends the same run twice.
-- **Optional AI help, off by default.** Each run can add short notes comparing your resume with each match (strengths, gaps, resume wording to fix), using a subscription you already have through the Claude Code, Codex or Gemini command-line tools, a local model with Ollama, or an API key. [docs/AI.md](docs/AI.md) compares the options. With the `mcp` extra, an AI assistant such as Claude Desktop can search and screen postings through your profile. Nothing in the core needs either one, and your resume is sent only when you turn that on.
+- **Optional AI help, off by default.** Each run can add short notes comparing your resume with each match (a fit level, gaps, resume wording to fix) and list stronger fits first without hiding any job, using a subscription you already have through the Claude Code, Codex or Gemini command-line tools, a local model with Ollama, or an API key. [docs/AI.md](docs/AI.md) compares the options. With the `mcp` extra, an AI assistant such as Claude Desktop can search and screen postings through your profile. Nothing in the core needs either one, and your resume is sent only when you turn that on.
 - **Sets itself up.** `usajobs-monitor init` asks a few questions and writes your profile, with starting eligibility for your applicant type: current federal employee, excepted service, veteran, military spouse, student, recent graduate, former federal employee, Schedule A, or the general public.
 
 Output is your choice of an HTML digest (`usajobs_digest.html`), a CSV of every job reviewed (`usajobs_jobs.csv`), a Word briefing (`usajobs_briefing.docx`) and an Excel tracker (`usajobs_tracker.xlsx`), plus a `usajobs_last_run.json` summary. Profiles written by `init` use HTML and CSV; older profiles keep Word and Excel until you set [`report.formats`](docs/CONFIG_REFERENCE.md#report-and-scoring).
@@ -651,6 +651,14 @@ Good habits:
 | 4 | `init` wizard, applicant-type presets, multiple profiles, `decide` command, HTML/CSV outputs | Done |
 | 5 | Optional AI add-on: résumé fit notes and an MCP server. The core never requires AI. | Done |
 | 6 | Docker image and compose example with a built-in scheduler | Done |
+| 7 | AI fit ranking (strong, possible, stretch, unlikely) with an "AI gaps" line, several resume versions with the best one named per job, resume-first prompt caching, and ready-made providers for the Claude Code, Codex and Gemini CLIs and Ollama ([docs/AI.md](docs/AI.md)) | Done (v0.2.0) |
+
+Phases 1 to 6 shipped in v0.1.0. Ideas under consideration, not promises:
+
+- A built-in provider for OpenAI-compatible APIs (OpenAI, Gemini, OpenRouter, LM Studio and others), so API-key users don't need the `llm` tool.
+- Choosing which resume version to send for each job, rather than sending every version in each prompt.
+
+Suggestions are welcome as issues.
 
 ## Contributing
 
