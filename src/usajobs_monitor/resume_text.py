@@ -8,6 +8,7 @@ which the core already installs. PDF and other formats use the optional
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 
 TEXT_SUFFIXES = {".md", ".markdown", ".txt", ".text"}
@@ -55,7 +56,8 @@ def pick_resumes(resume: Path | None, folder: Path | None) -> tuple[list[Path], 
 def resume_names(paths: list[Path]) -> list[str]:
     """Short names for several resume versions: file names without the suffix, and
     without the words they all start with ("Pat Lee - Resume - Analyst" and
-    "Pat Lee - Resume - Director" become "Analyst" and "Director")."""
+    "Pat Lee - Resume - Director" become "Analyst" and "Director"), and without a
+    leading "Resume" left over when one file is named differently."""
     stems = [path.stem.replace('"', "'") for path in paths]
     if len(stems) < 2:
         return stems
@@ -65,6 +67,8 @@ def resume_names(paths: list[Path]) -> list[str]:
     while shared and stems[0][shared - 1] not in " -_–,.":
         shared -= 1
     short = [stem[shared:].strip(" -_–,.") for stem in stems]
+    # A leftover leading "Resume" ("Resume - Analyst" when one file is named differently).
+    short = [re.sub(r"^(?:resume|cv)\b[\s\-_–,.]*", "", name, flags=re.IGNORECASE) or name for name in short]
     return short if all(short) and len(set(short)) == len(short) else stems
 
 

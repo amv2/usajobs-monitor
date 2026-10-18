@@ -49,7 +49,7 @@ def format_timestamp(moment: datetime) -> str:
 
 def resume_note(resumes: list[Path], rated: int = 0) -> str:
     if rated:
-        return (f"Resumes: the AI compared your resume with {rated} posting{'s' if rated != 1 else ''}; "
+        return (f"Resumes: the AI compared your resume{'s' if len(resumes) > 1 else ''} with {rated} posting{'s' if rated != 1 else ''}; "
                 "see AI fit on each job and the fit notes.")
     if not resumes:
         return "Resumes: none found in the configured folder."

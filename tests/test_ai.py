@@ -167,6 +167,9 @@ class ResumeTests(unittest.TestCase):
         self.assertEqual(resume_text.resume_names([Path("Resume v1.md"), Path("Resume v2.md")]), ["v1", "v2"])
         self.assertEqual(resume_text.resume_names([Path("a.md"), Path("a.txt")]), ["a", "a"])
         self.assertEqual(resume_text.resume_names([Path("Only.md")]), ["Only"])
+        self.assertEqual(resume_text.resume_names([Path("Pat Lee - Resume - Analyst.pdf"),
+                                                   Path("Pat Lee Resume 2026 - Director.pdf")]),
+                         ["Analyst", "2026 - Director"])
 
     def test_several_resumes_are_named_versions(self):
         (self.folder / "Budget Director.md").write_text("Directed budgets.")
