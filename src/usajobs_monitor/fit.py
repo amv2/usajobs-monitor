@@ -45,7 +45,7 @@ from .jobs import (
     salary_display,
 )
 from .config import ai_provider_allowed, ai_provider_hint
-from .resume_text import ResumeError, find_resume, read_resume
+from .resume_text import ResumeError, find_resumes, read_resumes, resume_name
 from .review import ReviewResult
 from .tracking import FIT_LABELS
 
@@ -65,6 +65,7 @@ FIT_SCHEMA: dict[str, Any] = {
     "properties": {
         "fit": {"type": "string", "enum": list(FIT_LEVELS)},
         "summary": {"type": "string"},
+        "resume_used": {"type": "string"},
         "requirements": {
             "type": "array",
             "items": {
@@ -83,7 +84,7 @@ FIT_SCHEMA: dict[str, Any] = {
         "resume_tips": {"type": "array", "items": {"type": "string"}},
         "questions_to_verify": {"type": "array", "items": {"type": "string"}},
     },
-    "required": ["fit", "summary", "requirements", "strengths", "gaps", "resume_tips", "questions_to_verify"],
+    "required": ["fit", "summary", "resume_used", "requirements", "strengths", "gaps", "resume_tips", "questions_to_verify"],
     "additionalProperties": False,
 }
 
@@ -97,6 +98,11 @@ selective factors, and the main duties. Ground every strength and gap in specifi
 assume experience the resume does not show. Federal HR specialists screen resumes literally, so note where \
 experience exists but is not stated in the posting's terms, and where a federal resume would need dates, \
 hours per week, grade or series to get credit.
+
+The resume may come as several versions, each in a <resume_version name="..."> block. They are the same \
+person's resume written for different kinds of jobs: judge the posting with the one version that fits it \
+best, put that version's name exactly in resume_used, and draw strengths, gaps and evidence from it. With a \
+single resume, leave resume_used empty.
 
 List each required qualification in requirements: the specialized experience statement, any required \
 education, certification or license, and each selective factor, in the posting's own words, shortened. Leave \
@@ -272,8 +278,9 @@ def build_prompt(result: ReviewResult, resume: str, tier: str = "") -> str:
             "Compare the resume with the posting.")
 
 
-def parse_fit(text: str) -> dict[str, Any]:
-    """The provider's JSON answer, checked against FIT_SCHEMA's shape."""
+def parse_fit(text: str, resume_names: list[str] | None = None) -> dict[str, Any]:
+    """The provider's JSON answer, checked against FIT_SCHEMA's shape. ``resume_used``
+    is kept only when it names one of ``resume_names``."""
     start, end = text.find("{"), text.rfind("}")
     try:
         data = json.loads(text[start:end + 1]) if start != -1 and end > start else None
@@ -293,6 +300,8 @@ def parse_fit(text: str) -> dict[str, Any]:
                                  "evidence": str(item.get("evidence") or "").strip()})
     note: dict[str, Any] = {"fit": capped_fit(fit, requirements), "summary": str(data.get("summary") or "").strip(),
                             "requirements": requirements[:8]}
+    used = str(data.get("resume_used") or "").strip()
+    note["resume_used"] = used if used in (resume_names or []) else ""
     for key in ("strengths", "gaps", "resume_tips", "questions_to_verify"):
         items = data.get(key) or []
         note[key] = [str(item).strip() for item in items if str(item).strip()][:8] if isinstance(items, list) else []
@@ -308,8 +317,9 @@ def capped_fit(fit: str, requirements: list[dict[str, str]]) -> str:
     return max(fit, cap, key=FIT_LEVELS.index)
 
 
-def fit_note(result: ReviewResult, resume: str, provider: Provider, tier: str = "") -> dict[str, Any]:
-    return parse_fit(provider.complete(SYSTEM_PROMPT, build_prompt(result, resume, tier)))
+def fit_note(result: ReviewResult, resume: str, provider: Provider, tier: str = "",
+             resume_names: list[str] | None = None) -> dict[str, Any]:
+    return parse_fit(provider.complete(SYSTEM_PROMPT, build_prompt(result, resume, tier)), resume_names)
 
 
 def cache_key(number: str, resume: str, label: str) -> str:
@@ -357,7 +367,9 @@ def run_fit_notes(settings: Any, view: Any, output_dir: Path, today: date,
     if not picked:
         return {"status": "ok", "notes": 0, "from_cache": 0, "failed": 0}
     try:
-        resume = read_resume(find_resume(settings.ai_resume, settings.resume_folder))
+        paths = find_resumes(settings.ai_resume, settings.resume_folder)
+        resume = read_resumes(paths)
+        names = [resume_name(path) for path in paths] if len(paths) > 1 else []
         provider = provider or make_provider(ai)
     except (ResumeError, FitError) as exc:
         return {"status": "error", "message": str(exc)}
@@ -377,7 +389,7 @@ def run_fit_notes(settings: Any, view: Any, output_dir: Path, today: date,
             from_cache += 1
         else:
             try:
-                note = {**fit_note(result, resume, provider, tier), "generated_on": today.isoformat(),
+                note = {**fit_note(result, resume, provider, tier, names), "generated_on": today.isoformat(),
                         "provider": label}
             except FitError as exc:
                 failures.append(f"{number}: {exc}")
@@ -389,6 +401,8 @@ def run_fit_notes(settings: Any, view: Any, output_dir: Path, today: date,
                 continue
             cache[key] = note
         view.fits[number] = note["fit"]
+        if note.get("resume_used"):
+            view.fit_resumes[number] = note["resume_used"]
         notes.append({**note, "tier": tier, "control_number": number, "url": job_url(result.job),
                       "title": str(result.job.get("PositionTitle") or ""),
                       "agency": str(result.job.get("OrganizationName") or "")})
@@ -410,6 +424,8 @@ REQUIREMENT_LABELS = {"met": "Met", "unclear": "Unclear", "missing": "Missing"}
 
 def render_note(note: Mapping[str, Any]) -> str:
     lines = [f"**{FIT_LABELS.get(note['fit'], note['fit'])}.** {note['summary']}".rstrip()]
+    if note.get("resume_used"):
+        lines += ["", f"Best resume for this posting: {note['resume_used']}"]
     if note.get("requirements"):
         lines += ["", "Requirements:"]
         for item in note["requirements"]:

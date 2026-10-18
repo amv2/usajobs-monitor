@@ -195,9 +195,14 @@ class RunView:
     history_state: str = "missing"
     # AI fit level by control number, filled in by the optional fit notes.
     fits: dict[str, str] = field(default_factory=dict)
+    # With several resume versions, the one the AI judged each posting by.
+    fit_resumes: dict[str, str] = field(default_factory=dict)
 
     def fit_text(self, result: ReviewResult) -> str:
-        return FIT_LABELS.get(self.fits.get(job_id(result.job), ""), "")
+        number = job_id(result.job)
+        label = FIT_LABELS.get(self.fits.get(number, ""), "")
+        resume = self.fit_resumes.get(number)
+        return f"{label} (resume: {resume})" if label and resume else label
 
     def rank_by_fit(self) -> None:
         """Sort each list by AI fit level, keeping the current order within a level.

@@ -12,19 +12,22 @@ from pathlib import Path
 TEXT_SUFFIXES = {".md", ".markdown", ".txt", ".text"}
 SUPPORTED_SUFFIXES = TEXT_SUFFIXES | {".docx", ".pdf"}
 MAX_RESUME_CHARS = 60_000  # about 15 pages; longer files are almost always the wrong file
+MAX_RESUMES = 5  # versions compared at once; each one adds to every prompt
 
 
 class ResumeError(Exception):
     """A fixed, safe message naming the file but never its contents."""
 
 
-def find_resume(resume: Path | None, folder: Path | None) -> Path:
-    """``ai.resume`` when set, else the only supported file in ``paths.resume_folder``."""
+def find_resumes(resume: Path | None, folder: Path | None) -> list[Path]:
+    """``ai.resume`` when it is a file, else every supported file in that folder or
+    ``paths.resume_folder`` (up to ``MAX_RESUMES``): versions of one person's resume,
+    and the AI judges each posting with the one that fits it best."""
     if resume is not None:
         if resume.is_dir():
             folder = resume
         elif resume.is_file():
-            return resume
+            return [resume]
         else:
             raise ResumeError(f"ai.resume: {resume} was not found")
     if folder is None:
@@ -33,11 +36,25 @@ def find_resume(resume: Path | None, folder: Path | None) -> Path:
         raise ResumeError(f"paths.resume_folder: {folder} was not found")
     candidates = sorted((p for p in folder.iterdir() if p.is_file() and p.suffix.lower() in SUPPORTED_SUFFIXES
                          and not p.name.startswith((".", "~$"))), key=lambda p: p.name.casefold())
-    if len(candidates) == 1:
-        return candidates[0]
     if not candidates:
         raise ResumeError(f"no .md, .txt, .docx or .pdf resume in {folder}; set ai.resume to one file")
-    raise ResumeError(f"{len(candidates)} resumes in {folder}; set ai.resume to the one to compare against postings")
+    if len(candidates) > MAX_RESUMES:
+        raise ResumeError(f"{len(candidates)} resumes in {folder}, more than the {MAX_RESUMES} compared at once; "
+                          "set ai.resume to one file or a folder with fewer")
+    return candidates
+
+
+def resume_name(path: Path) -> str:
+    """How the AI and the reports name one resume version: its file name without the suffix."""
+    return path.stem
+
+
+def read_resumes(paths: list[Path]) -> str:
+    """One resume as plain text, or several, each marked with its name."""
+    if len(paths) == 1:
+        return read_resume(paths[0])
+    return "\n\n".join(f'<resume_version name="{resume_name(path).replace(chr(34), chr(39))}">\n'
+                        f"{read_resume(path)}\n</resume_version>" for path in paths)
 
 
 def read_resume(path: Path) -> str:

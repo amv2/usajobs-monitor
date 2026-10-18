@@ -129,17 +129,30 @@ class ResumeTests(unittest.TestCase):
             with self.subTest(path=path.name), self.assertRaises(resume_text.ResumeError):
                 resume_text.read_resume(path)
 
-    def test_find_resume_in_folder(self):
+    def test_find_resumes_in_folder(self):
         with self.assertRaises(resume_text.ResumeError):
-            resume_text.find_resume(None, None)
+            resume_text.find_resumes(None, None)
         (self.folder / "one.md").write_text("x")
         (self.folder / "notes.xlsx").write_text("x")
-        self.assertEqual(resume_text.find_resume(None, self.folder).name, "one.md")
+        self.assertEqual([p.name for p in resume_text.find_resumes(None, self.folder)], ["one.md"])
         (self.folder / "two.docx").write_text("x")
+        self.assertEqual([p.name for p in resume_text.find_resumes(None, self.folder)], ["one.md", "two.docx"])
+        self.assertEqual([p.name for p in resume_text.find_resumes(self.folder / "two.docx", self.folder)],
+                         ["two.docx"])
+        for index in range(resume_text.MAX_RESUMES):
+            (self.folder / f"extra{index}.txt").write_text("x")
         with self.assertRaises(resume_text.ResumeError) as caught:
-            resume_text.find_resume(None, self.folder)
+            resume_text.find_resumes(None, self.folder)
         self.assertIn("set ai.resume", str(caught.exception))
-        self.assertEqual(resume_text.find_resume(self.folder / "two.docx", self.folder).name, "two.docx")
+
+    def test_several_resumes_are_named_versions(self):
+        (self.folder / "Budget Director.md").write_text("Directed budgets.")
+        (self.folder / "Analyst.txt").write_text("Analyzed things.")
+        text = resume_text.read_resumes(resume_text.find_resumes(None, self.folder))
+        self.assertIn('<resume_version name="Analyst">\nAnalyzed things.\n</resume_version>', text)
+        self.assertIn('<resume_version name="Budget Director">', text)
+        single = resume_text.read_resumes([self.folder / "Analyst.txt"])
+        self.assertEqual(single, "Analyzed things.")
 
 
 class FitNoteTests(unittest.TestCase):
@@ -255,6 +268,22 @@ class FitNoteTests(unittest.TestCase):
         fit.run_fit_notes(settings, view, self.out, date.today(), FakeProvider())
         self.assertEqual(view.fits, {"1": "possible", "2": "possible"})
         self.assertEqual(view.fit_text(view.matches[0]), "Possible fit")
+
+    def test_best_resume_is_recorded_and_shown(self):
+        folder = self.base / "resumes"
+        folder.mkdir()
+        (folder / "Budget.md").write_text("Budget work.")
+        (folder / "Policy.md").write_text("Policy work.")
+        settings = self.settings(resume="resumes")
+        provider = FakeProvider({**GOOD_ANSWER, "resume_used": "Budget"})
+        view = self.view(settings, [job("1")])
+        fit.run_fit_notes(settings, view, self.out, date.today(), provider)
+        self.assertIn('<resume_version name="Policy">', provider.calls[0][1])
+        self.assertEqual(view.fit_text(view.matches[0]), "Possible fit (resume: Budget)")
+        self.assertIn("Best resume for this posting: Budget", (self.out / fit.FIT_NOTES_NAME).read_text())
+        # A name that is not one of the versions is dropped rather than shown.
+        note = fit.parse_fit(json.dumps({**GOOD_ANSWER, "resume_used": "Made Up"}), ["Budget", "Policy"])
+        self.assertEqual(note["resume_used"], "")
 
     def test_rank_by_fit_reorders_without_hiding(self):
         settings = self.settings()
