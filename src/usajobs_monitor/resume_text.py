@@ -21,14 +21,20 @@ class ResumeError(Exception):
 
 
 def find_resumes(resume: Path | None, folder: Path | None) -> list[Path]:
-    """``ai.resume`` when it is a file, else every supported file in that folder or
-    ``paths.resume_folder`` (up to ``MAX_RESUMES``): versions of one person's resume,
-    and the AI judges each posting with the one that fits it best."""
+    return pick_resumes(resume, folder)[0]
+
+
+def pick_resumes(resume: Path | None, folder: Path | None) -> tuple[list[Path], int]:
+    """``(resumes, left_out)``: ``ai.resume`` when it is a file, else the supported files
+    in that folder or ``paths.resume_folder``: versions of one person's resume, and the
+    AI judges each posting with the one that fits it best. A folder you keep adding
+    tailored copies to can outgrow ``MAX_RESUMES``; then the most recently changed
+    ones are used and ``left_out`` counts the rest."""
     if resume is not None:
         if resume.is_dir():
             folder = resume
         elif resume.is_file():
-            return [resume]
+            return [resume], 0
         else:
             raise ResumeError(f"ai.resume: {resume} was not found")
     if folder is None:
@@ -39,10 +45,11 @@ def find_resumes(resume: Path | None, folder: Path | None) -> list[Path]:
                          and not p.name.startswith((".", "~$"))), key=lambda p: p.name.casefold())
     if not candidates:
         raise ResumeError(f"no .md, .txt, .docx or .pdf resume in {folder}; set ai.resume to one file")
-    if len(candidates) > MAX_RESUMES:
-        raise ResumeError(f"{len(candidates)} resumes in {folder}, more than the {MAX_RESUMES} compared at once; "
-                          "set ai.resume to one file or a folder with fewer")
-    return candidates
+    if len(candidates) <= MAX_RESUMES:
+        return candidates, 0
+    newest = sorted(candidates, key=lambda p: p.stat().st_mtime, reverse=True)[:MAX_RESUMES]
+    # Name order, not age order, so the prompt (and its cache) stays the same between runs.
+    return sorted(newest, key=lambda p: p.name.casefold()), len(candidates) - MAX_RESUMES
 
 
 def resume_names(paths: list[Path]) -> list[str]:

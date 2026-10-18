@@ -140,10 +140,12 @@ class ResumeTests(unittest.TestCase):
         self.assertEqual([p.name for p in resume_text.find_resumes(self.folder / "two.docx", self.folder)],
                          ["two.docx"])
         for index in range(resume_text.MAX_RESUMES):
-            (self.folder / f"extra{index}.txt").write_text("x")
-        with self.assertRaises(resume_text.ResumeError) as caught:
-            resume_text.find_resumes(None, self.folder)
-        self.assertIn("set ai.resume", str(caught.exception))
+            path = self.folder / f"extra{index}.txt"
+            path.write_text("x")
+            os.utime(path, (2_000_000_000 + index, 2_000_000_000 + index))  # newer than one.md and two.docx
+        picked, left_out = resume_text.pick_resumes(None, self.folder)
+        self.assertEqual(left_out, 2)
+        self.assertEqual([p.name for p in picked], [f"extra{index}.txt" for index in range(resume_text.MAX_RESUMES)])
 
     def test_resume_names_drop_the_shared_start(self):
         names = resume_text.resume_names([Path("Pat Lee - Resume - Budget Director.pdf"),
@@ -184,6 +186,9 @@ class FitNoteTests(unittest.TestCase):
         settings = self.settings()
         result = review_job(job(), settings.config)
         prompt = fit.build_prompt(result, "RESUME TEXT", "Match")
+        # The resume comes first so every posting in a run shares a cacheable start.
+        self.assertTrue(prompt.startswith("<resume>\nRESUME TEXT\n</resume>"))
+        self.assertLess(prompt.index("</resume>"), prompt.index("<posting>"))
         self.assertIn("<posting>", prompt)
         self.assertIn("Formulate the budget.", prompt)
         self.assertIn("<resume>\nRESUME TEXT\n</resume>", prompt)
@@ -470,6 +475,20 @@ class ProviderTests(unittest.TestCase):
         self.assertEqual(kwargs["output_config"]["effort"], "medium")
         self.assertEqual(kwargs["output_config"]["format"]["schema"], fit.FIT_SCHEMA)
         self.assertEqual((kwargs["fallbacks"], kwargs["betas"]), ("default", [fit.FALLBACK_BETA]))
+
+    def test_anthropic_caches_the_resume_part(self):
+        provider = fit.make_provider(self.AI, env={"ANTHROPIC_API_KEY": "test-key"})
+        response = mock.Mock(stop_reason="end_turn", content=[mock.Mock(type="text", text=json.dumps(GOOD_ANSWER))],
+                             usage=mock.Mock(cache_read_input_tokens=900))
+        settings = load_settings(Path("p.toml"), require_credentials=False, raw=BASE)
+        result = review_job(job(), settings.config)
+        with mock.patch.object(provider.client.beta.messages, "create", return_value=response) as create:
+            fit.fit_note(result, "RESUME TEXT", provider, "Match")
+        content = create.call_args.kwargs["messages"][0]["content"]
+        self.assertEqual(content[0], {"type": "text", "text": "<resume>\nRESUME TEXT\n</resume>\n\n",
+                                      "cache_control": {"type": "ephemeral"}})
+        self.assertTrue(content[1]["text"].startswith("<posting>"))
+        self.assertEqual(provider.cache_read_tokens, 900)
 
     @unittest.skipUnless(importlib.util.find_spec("anthropic"), "anthropic not installed")
     def test_anthropic_refusal_and_errors(self):

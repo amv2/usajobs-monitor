@@ -512,7 +512,7 @@ Get an API key from the [Claude Console](https://platform.claude.com/). Then add
 
 ```toml
 [ai]
-resume      = "resume.md"   # .md, .txt, .docx or .pdf, or a folder of up to 5 versions; relative to this file
+resume      = "resume.md"   # .md, .txt, .docx or .pdf, or a folder of versions; relative to this file
 send_resume = true          # required: without it your resume never leaves your computer
 fit_notes   = true          # add notes to every run
 # rank     = true                        # list stronger fits first (nothing is hidden)
@@ -524,7 +524,7 @@ fit_notes   = true          # add notes to every run
 
 With `rank = true`, each list is sorted by fit level: strong, possible, then postings without a note, then stretch and unlikely. Nothing is dropped, so a wrong "unlikely" only moves a job down. The AI judges the minimum qualifications from your resume, not how the assessment questionnaire will place you.
 
-Notes are cached by posting, resume and model, so a run three times a week pays only for postings it hasn't reviewed yet. Changing your resume refreshes them. With several resume versions (a folder), each posting is judged by the version that fits it best, and the reports name it, for example "Strong (resume: Budget Director)". Every version goes into each prompt, so each note costs more. A failed note never fails the run: the reports still publish, and the reason is in the run summary.
+Notes are cached by posting, resume and model, so a run three times a week pays only for postings it hasn't reviewed yet. Changing your resume refreshes them. With several resume versions (a folder), each posting is judged by the version that fits it best, and the reports name it, for example "Strong (resume: Budget Director)". Every version goes into each prompt, ahead of the posting, so with the `anthropic` provider the resumes are cached after the first posting of a run and later postings read them at a fraction of the price. A folder you keep adding tailored copies to is fine: past 5 versions, the 5 most recently changed are used. Adding or editing a resume re-rates cached postings once. A failed note never fails the run: the reports still publish, and the reason is in the run summary.
 
 To check one posting first, or to see exactly what would be sent:
 

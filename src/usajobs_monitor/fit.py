@@ -45,7 +45,7 @@ from .jobs import (
     salary_display,
 )
 from .config import ai_provider_allowed, ai_provider_hint
-from .resume_text import ResumeError, find_resumes, read_resumes, resume_names
+from .resume_text import MAX_RESUMES, ResumeError, pick_resumes, read_resumes, resume_names
 from .review import ReviewResult
 from .tracking import FIT_LABELS, FIT_RANK
 
@@ -151,8 +151,18 @@ class AnthropicProvider:
         self.model = model
         self.effort = effort
         self.label = f"anthropic {model}"
+        self.cache_read_tokens = 0
 
     def complete(self, system: str, prompt: str) -> str:
+        return self._send(system, prompt)
+
+    def complete_parts(self, system: str, stable: str, varying: str) -> str:
+        """``stable`` (the resumes) is the same for every posting in a run, so it is
+        marked for prompt caching: later postings read it from the cache cheaply."""
+        return self._send(system, [{"type": "text", "text": stable, "cache_control": {"type": "ephemeral"}},
+                                   {"type": "text", "text": varying}])
+
+    def _send(self, system: str, content: Any) -> str:
         anthropic = self._anthropic
         extra: dict[str, Any] = {}
         if self.model in FALLBACK_MODELS:
@@ -162,7 +172,7 @@ class AnthropicProvider:
                 model=self.model,
                 max_tokens=16000,
                 system=system,
-                messages=[{"role": "user", "content": prompt}],
+                messages=[{"role": "user", "content": content}],
                 output_config={"effort": self.effort, "format": {"type": "json_schema", "schema": FIT_SCHEMA}},
                 **extra,
             )
@@ -178,6 +188,8 @@ class AnthropicProvider:
             raise FitError(f"the Claude API returned HTTP {exc.status_code}") from None
         except anthropic.APIConnectionError:
             raise FitError("could not reach the Claude API", fatal=True) from None
+        cached = getattr(getattr(response, "usage", None), "cache_read_input_tokens", 0)
+        self.cache_read_tokens += cached if isinstance(cached, int) else 0
         if response.stop_reason == "refusal":
             raise FitError("the model declined to review this posting")
         if response.stop_reason == "max_tokens":
@@ -273,9 +285,15 @@ def posting_text(result: ReviewResult, tier: str = "") -> str:
     return "\n".join(lines)
 
 
+def prompt_parts(result: ReviewResult, resume: str, tier: str = "") -> tuple[str, str]:
+    """``(stable, varying)``: the resume first, identical for every posting in a run
+    so providers can cache it, then the posting."""
+    return (f"<resume>\n{resume}\n</resume>\n\n",
+            f"<posting>\n{posting_text(result, tier)}\n</posting>\n\nCompare the resume with the posting.")
+
+
 def build_prompt(result: ReviewResult, resume: str, tier: str = "") -> str:
-    return (f"<posting>\n{posting_text(result, tier)}\n</posting>\n\n<resume>\n{resume}\n</resume>\n\n"
-            "Compare the resume with the posting.")
+    return "".join(prompt_parts(result, resume, tier))
 
 
 def parse_fit(text: str, resume_names: list[str] | None = None) -> dict[str, Any]:
@@ -319,7 +337,10 @@ def capped_fit(fit: str, requirements: list[dict[str, str]]) -> str:
 
 def fit_note(result: ReviewResult, resume: str, provider: Provider, tier: str = "",
              resume_names: list[str] | None = None) -> dict[str, Any]:
-    return parse_fit(provider.complete(SYSTEM_PROMPT, build_prompt(result, resume, tier)), resume_names)
+    stable, varying = prompt_parts(result, resume, tier)
+    answer = (provider.complete_parts(SYSTEM_PROMPT, stable, varying) if isinstance(provider, AnthropicProvider)
+              else provider.complete(SYSTEM_PROMPT, stable + varying))
+    return parse_fit(answer, resume_names)
 
 
 def cache_key(number: str, resume: str, label: str) -> str:
@@ -367,7 +388,7 @@ def run_fit_notes(settings: Any, view: Any, output_dir: Path, today: date,
     if not picked:
         return {"status": "ok", "notes": 0, "from_cache": 0, "failed": 0}
     try:
-        paths = find_resumes(settings.ai_resume, settings.resume_folder)
+        paths, left_out = pick_resumes(settings.ai_resume, settings.resume_folder)
         resume = read_resumes(paths)
         names = resume_names(paths) if len(paths) > 1 else []
         provider = provider or make_provider(ai)
@@ -418,8 +439,13 @@ def run_fit_notes(settings: Any, view: Any, output_dir: Path, today: date,
     status = "ok" if not failures else ("partial" if notes else "error")
     outcome: dict[str, Any] = {"status": status, "notes": len(notes), "from_cache": from_cache,
                                "failed": len(failures), "file": FIT_NOTES_NAME}
+    if isinstance(provider, AnthropicProvider) and provider.cache_read_tokens:
+        outcome["cache_read_tokens"] = provider.cache_read_tokens
     if failures:
         outcome["message"] = failures[0].partition(": ")[2]
+    elif left_out:
+        outcome["message"] = (f"used the {MAX_RESUMES} most recently changed resumes; {left_out} older "
+                              f"{'one was' if left_out == 1 else 'ones were'} left out")
     return outcome
 
 
