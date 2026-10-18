@@ -195,6 +195,15 @@ class FitNoteTests(unittest.TestCase):
         results = [review_job(j, settings.config) for j in jobs]
         return build_view(results, settings.config, None, {}, date(2026, 10, 17), "m")
 
+    def test_status_line_says_when_the_provider_is_not_allowed_yet(self):
+        from usajobs_monitor.cli import _ai_status
+        settings = self.settings(provider="claude-cli")
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("USAJOBS_ALLOW_AI_PROVIDER", None)
+            self.assertIn("not allowed yet (set USAJOBS_ALLOW_AI_PROVIDER=claude-cli)", _ai_status(settings))
+        with mock.patch.dict(os.environ, {"USAJOBS_ALLOW_AI_PROVIDER": "claude-cli"}):
+            self.assertNotIn("not allowed", _ai_status(settings))
+
     def test_prompt_marks_posting_and_resume_as_data(self):
         settings = self.settings()
         result = review_job(job(), settings.config)

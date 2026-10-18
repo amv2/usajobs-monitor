@@ -554,7 +554,7 @@ def _check_ai(check: _Checker, config: dict[str, Any]) -> None:
         if isinstance(value, int) and not isinstance(value, bool) and not low <= value <= high:
             check.error(f"ai.{key}", f"expected {low} to {high}")
     if isinstance(provider, str) and provider != "anthropic" and not ai_provider_allowed(ai, os.environ):
-        check.warnings.append(ai_provider_hint(ai) + "; until then fit notes and fit are refused")
+        check.warnings.append(ai_provider_hint(ai) + "; until then runs skip fit notes and the fit command refuses")
     if provider == "command":
         check.warnings += claude_command_warnings([str(part) for part in ai.get("command") or []])
     if ai.get("fit_notes") is True and ai.get("send_resume") is not True:
