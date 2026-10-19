@@ -490,7 +490,7 @@ def main_gap(note: Mapping[str, Any]) -> str:
     for status in ("missing", "unclear"):
         for item in note.get("requirements") or []:
             if item["status"] == status:
-                return f"{REQUIREMENT_LABELS[status]}: {item['requirement']}"
+                return f"{item['requirement']} ({'not on resume' if status == 'missing' else 'unclear on resume'})"
     return ""
 
 

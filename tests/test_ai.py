@@ -410,7 +410,7 @@ class RankedRunTests(unittest.TestCase):
         self.assertEqual(summary["matches"][1]["ai_gaps"], "Not shown on resume: Supervising staff")
         self.assertEqual([m["ai_level"] for m in summary["matches"]], ["Strong", "Stretch", "Unlikely"])
         self.assertTrue(all(m["ai_note"] for m in summary["matches"]))
-        self.assertEqual(summary["matches"][1]["ai_gap"], "Not shown on resume: Supervising staff")
+        self.assertEqual(summary["matches"][1]["ai_gap"], "Supervising staff (not on resume)")
         page = (out / "usajobs_digest.html").read_text()
         self.assertLess(page.index("job/2"), page.index("job/1"))
         self.assertIn("AI fit:</b> Strong. Close; say budget formulation outright.", page)
