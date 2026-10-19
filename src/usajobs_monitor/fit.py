@@ -444,6 +444,8 @@ def run_fit_notes(settings: Any, view: Any, output_dir: Path, today: date,
             view.fit_summaries[number] = note["summary"]
         if gap_text(note):
             view.fit_gaps[number] = gap_text(note)
+        if main_gap(note):
+            view.fit_main_gaps[number] = main_gap(note)
         if note.get("ai_fit"):
             view.fit_lowered[number] = note["ai_fit"]
         notes.append({**note, "tier": tier, "control_number": number, "url": job_url(result.job),
@@ -481,6 +483,15 @@ def gap_text(note: Mapping[str, Any]) -> str:
         if items:
             parts.append(f"{REQUIREMENT_LABELS[status]}: {'; '.join(items)}")
     return ". ".join(parts)
+
+
+def main_gap(note: Mapping[str, Any]) -> str:
+    """The first requirement not shown on the resume, else the first unclear one."""
+    for status in ("missing", "unclear"):
+        for item in note.get("requirements") or []:
+            if item["status"] == status:
+                return f"{item['requirement']} ({'not on resume' if status == 'missing' else 'unclear on resume'})"
+    return ""
 
 
 def lowered_text(note: Mapping[str, Any]) -> str:

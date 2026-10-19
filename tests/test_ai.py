@@ -408,6 +408,9 @@ class RankedRunTests(unittest.TestCase):
         self.assertEqual([m["ai_fit"] for m in summary["matches"]],
                          ["Strong", "Stretch (AI said Possible)", "Unlikely"])
         self.assertEqual(summary["matches"][1]["ai_gaps"], "Not shown on resume: Supervising staff")
+        self.assertEqual([m["ai_level"] for m in summary["matches"]], ["Strong", "Stretch", "Unlikely"])
+        self.assertTrue(all(m["ai_note"] for m in summary["matches"]))
+        self.assertEqual(summary["matches"][1]["ai_gap"], "Supervising staff (not on resume)")
         page = (out / "usajobs_digest.html").read_text()
         self.assertLess(page.index("job/2"), page.index("job/1"))
         self.assertIn("AI fit:</b> Strong. Close; say budget formulation outright.", page)
@@ -422,6 +425,16 @@ class RankedRunTests(unittest.TestCase):
                          {"1": "Unlikely", "2": "Strong", "3": "Stretch (AI said Possible)"})
         self.assertEqual({row["Control Number"]: row["AI Gaps"] for row in rows}["3"],
                          "Not shown on resume: Supervising staff")
+
+    def test_first_sentence_keeps_email_notes_short(self):
+        from usajobs_monitor.reports import first_sentence
+        self.assertEqual(first_sentence("You meet the bar.  Reframe the resume. More."), "You meet the bar.")
+        self.assertEqual(first_sentence("No full stop"), "No full stop")
+        self.assertEqual(first_sentence("Ex-U.S. Secret Service work fits. Next."), "Ex-U.S. Secret Service work fits.")
+        cut = first_sentence("word " * 200)
+        self.assertLessEqual(len(cut), 300)
+        self.assertTrue(cut.endswith("word…"))
+        self.assertEqual(first_sentence(""), "")
 
     def test_without_rank_order_is_unchanged_but_fit_is_shown(self):
         summary, _ = self.run_search()

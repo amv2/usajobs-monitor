@@ -454,8 +454,9 @@ def _check_delivery(check: _Checker, config: dict[str, Any]) -> None:
     after environment overrides, by ``delivery.check_channels``."""
     delivery = check.section(config, "delivery")
     check.unknown(delivery, "delivery", {"notify_on_failure", "max_attempts", "timeout_seconds",
-                                         "max_items", *DELIVERY_CHANNELS})
+                                         "max_items", "near_misses", *DELIVERY_CHANNELS})
     check.boolean(delivery, "notify_on_failure", "delivery", True)
+    check.string(delivery, "near_misses", "delivery", "new", choices=("new", "all"))
     for key, default, low, high in (("max_attempts", 3, 1, 5), ("timeout_seconds", 30, 1, 120),
                                     ("max_items", 5, 1, 25)):
         check.number(delivery, key, "delivery", default, integer=True)

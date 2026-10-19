@@ -45,6 +45,7 @@ class Section:
     heading: str
     items: list[Item] = field(default_factory=list)
     lines: list[str] = field(default_factory=list)
+    intro: str = ""
 
 
 @dataclass
@@ -99,7 +100,8 @@ def grade(entry: dict) -> str:
     value = text(entry.get("grade"))
     pay_plan = text(entry.get("pay_plan"), "")
     if pay_plan and re.fullmatch(r"[\d\s–-]+", value):
-        return f"{pay_plan} {value}"
+        # "NH-04", as postings and the AI notes write it.
+        return f"{pay_plan}-" + re.sub(r"\b(\d)\b", r"0\1", value)
     return value
 
 
@@ -108,30 +110,59 @@ def _entries(summary: dict, key: str) -> list[dict]:
     return [item for item in value if isinstance(item, dict)] if isinstance(value, list) else []
 
 
-def _item(entry: dict, *, eligibility: bool = True) -> Item:
+def _numbers(value: str) -> list[int]:
+    return [int(n) for n in re.findall(r"\d+", value)]
+
+
+def _item(entry: dict, *, eligibility: bool = True, shared: frozenset[str] = frozenset()) -> Item:
     title = text(entry.get("title"))
     flags = [f for f in entry.get("flags", []) if isinstance(f, str)] if isinstance(entry.get("flags"), list) else []
     if flags:
         title += f" [{', '.join(text(f) for f in flags)}]"
-    details = [
-        f"Agency: {text(entry.get('agency'))}",
-        f"Grade: {grade(entry)}",
-        f"Promotion potential / full performance level: {text(entry.get('promotion_potential'))}",
-        f"Closes: {close_date(entry.get('close_date'))}",
-    ]
+    # One line of facts keeps each job short enough to scan on a phone.
+    facts = [text(entry.get("agency")), grade(entry)]
+    promotion = text(entry.get("promotion_potential"), "")
+    if (promotion and not promotion.lower().startswith(("none", "not listed"))
+            and _numbers(promotion) != _numbers(facts[-1])):
+        facts[-1] += f" (promotes to {promotion})"
+    facts.append(f"closes {close_date(entry.get('close_date'))}")
+    level = text(entry.get("ai_level"), "")
+    if level:
+        facts.insert(0, f"{level} fit")
+    details = [" · ".join(facts)]
     if eligibility:
         details.append(f"Eligibility: {text(entry.get('eligibility_basis'))}")
     if entry.get("your_status"):
         details.append(f"Your status: {text(entry.get('your_status'))}")
-    if entry.get("ai_fit"):
+    # Notes usually open with strengths, so a low rating shows its main gap instead.
+    if level in ("Stretch", "Unlikely") and entry.get("ai_gap"):
+        details.append(f"Main gap: {text(entry.get('ai_gap'))}")
+    elif entry.get("ai_note"):
+        details.append(f"AI note: {text(entry.get('ai_note'))}")
+    elif entry.get("ai_fit") and not level:
         details.append(f"AI fit: {text(entry.get('ai_fit'))}")
-    if entry.get("ai_gaps"):
-        details.append(f"AI gaps: {text(entry.get('ai_gaps'))}")
+    reasons = [text(r) for r in _reasons(entry) if r not in shared]
+    if reasons:
+        details.append(("Also excluded: " if shared else "Why excluded: ") + "; ".join(reasons[:3]))
     return Item(title, details, job_url(entry.get("url")))
 
 
+def _reasons(entry: dict) -> list[str]:
+    reasons = entry.get("exclusion_reasons")
+    return [r for r in reasons if isinstance(r, str)] if isinstance(reasons, list) else []
+
+
+def _excluded_section(heading: str, entries: list[dict]) -> Section:
+    """A watch list or near-miss section. A reason every listed job shares is said once, above the jobs."""
+    shared = frozenset.intersection(*(frozenset(_reasons(e)) for e in entries)) if len(entries) > 1 else frozenset()
+    section = Section(heading, [_item(e, eligibility=False, shared=shared) for e in entries])
+    if shared:
+        section.intro = "Every job below was excluded for: " + "; ".join(text(r) for r in _reasons(entries[0]) if r in shared)
+    return section
+
+
 def build_digest(manifest: dict, summary: dict, finished: datetime, *, max_items: int = 5,
-                 preview: bool = False) -> Digest:
+                 near_misses: str = "new", preview: bool = False) -> Digest:
     day = finished.date().isoformat()
     sections: list[Section] = []
     if manifest["status"] == "error":
@@ -147,6 +178,9 @@ def build_digest(manifest: dict, summary: dict, finished: datetime, *, max_items
         subject = f"USAJOBS — {day} — {matches} {'match' if matches == 1 else 'matches'}"
         if watch_count:
             subject += f" · {watch_count} watch"
+        near_count = count(summary.get("near_misses_reported"))
+        if near_misses == "all" and near_count:
+            subject += f" · {near_count} near {'miss' if near_count == 1 else 'misses'}"
         if new_total:
             subject += f" · {new_total} new"
         paragraphs = [
@@ -179,12 +213,21 @@ def build_digest(manifest: dict, summary: dict, finished: datetime, *, max_items
             sections.append(section)
         watch = _entries(summary, "watch_list")
         if watch:
-            sections.append(Section(f"{watch_label} (fails only the pay rule)",
-                                    [_item(e, eligibility=False) for e in watch[:max_items]]))
-        new_near = [e for e in _entries(summary, "top_near_misses")
-                    if isinstance(e.get("flags"), list) and "NEW" in e["flags"]]
-        if new_near:
-            sections.append(Section("New near misses", [_item(e, eligibility=False) for e in new_near[:max_items]]))
+            sections.append(_excluded_section(f"{watch_label} (fails only the pay rule)", watch[:max_items]))
+        near = _entries(summary, "top_near_misses")
+        if near_misses == "all":
+            if near:
+                ranked = isinstance(summary.get("fit_notes"), dict) and summary["fit_notes"].get("ranked") is True
+                section = _excluded_section("Near misses (best AI fit first)" if ranked else "Near misses",
+                                            near[:max_items])
+                more = count(summary.get("near_misses_reported")) - len(section.items)
+                if more > 0:
+                    section.lines.append(f"{more} more in the reports.")
+                sections.append(section)
+        else:
+            new_near = [e for e in near if isinstance(e.get("flags"), list) and "NEW" in e["flags"]]
+            if new_near:
+                sections.append(_excluded_section("New near misses", new_near[:max_items]))
         dropped = _entries(summary, "dropped_since_last_run")
         if dropped:
             sections.append(Section("Dropped since last run", lines=[
@@ -199,6 +242,8 @@ def plain_text(digest: Digest, note: str = "") -> str:
     lines = [digest.subject, "", *digest.paragraphs, *([note] if note else [])]
     for section in digest.sections:
         lines.extend(["", section.heading.upper()])
+        if section.intro:
+            lines.append(section.intro)
         for item in section.items:
             lines.extend(["", item.title, *item.details])
             if item.url:
@@ -212,11 +257,15 @@ def html_text(digest: Digest, note: str = "") -> str:
     """The email's HTML part: the same digest, styled inline so mail clients keep the look."""
     style = HTML_STYLE
     esc = html.escape
-    parts = ["<!doctype html><html><body style=\"" + style["body"] + "\">", f'<div style="{style["wrap"]}">',
+    parts = ['<!doctype html><html><head><meta charset="utf-8">'
+             '<meta name="viewport" content="width=device-width, initial-scale=1"></head>'
+             f'<body style="{style["body"]}">', f'<div style="{style["wrap"]}">',
              f'<h1 style="{style["h1"]}">{esc(digest.subject)}</h1>']
     parts.extend(f'<p style="{style["fact"]}">{esc(p)}</p>' for p in [*digest.paragraphs, *([note] if note else [])])
     for section in digest.sections:
         parts.append(f'<h2 style="{style["h2"]}">{esc(section.heading)}</h2>')
+        if section.intro:
+            parts.append(f'<p style="{style["muted"]};margin-bottom:8px">{esc(section.intro)}</p>')
         for item in section.items:
             parts.append(f'<div style="{style["card"]}"><h3 style="{style["title"]}">{esc(item.title)}</h3><ul style="margin:0;padding-left:18px">')
             parts.extend(f'<li style="{style["fact"]}">{esc(d)}</li>' for d in item.details)
@@ -273,7 +322,7 @@ def chat_text(digest: Digest, *, limit: int, link: str = "{url}", bold: str = "{
     budget = limit - len(footer) - 60  # room for the "more entries" line
     skipped = 0
     for section in digest.sections:
-        entries = []
+        entries = [escape(section.intro)] if section.intro else []
         for item in section.items:
             facts = [d for d in item.details if not d.startswith(("Promotion", "Your status"))]
             line = f"• {escape(item.title)} — " + "; ".join(escape(f) for f in facts)

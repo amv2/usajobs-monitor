@@ -201,6 +201,8 @@ class RunView:
     fit_summaries: dict[str, str] = field(default_factory=dict)
     # Requirements the resume does not show or shows unclearly, as one line.
     fit_gaps: dict[str, str] = field(default_factory=dict)
+    # The first requirement the resume does not show (or shows unclearly), for short messages.
+    fit_main_gaps: dict[str, str] = field(default_factory=dict)
     # The AI's own level when its requirement checklist lowered it.
     fit_lowered: dict[str, str] = field(default_factory=dict)
 
