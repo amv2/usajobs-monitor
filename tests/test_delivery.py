@@ -191,15 +191,22 @@ class EmailTests(DeliveryFixture):
         self.assertIn('<meta name="viewport" content="width=device-width, initial-scale=1">', markup)
 
     def test_near_misses_all_lists_ranked_entries_every_run(self):
-        near = [{"title": f"Near {i}", "flags": [], "ai_level": "Stretch", "ai_note": f"Note {i}."} for i in range(7)]
+        near = [{"title": f"Near {i}", "flags": [], "ai_level": "Stretch", "ai_note": f"Note {i}.",
+                 "ai_gap": f"Not shown on resume: Gap {i}", "exclusion_reasons": [f"Reason {i}"],
+                 "pay_plan": "GS", "grade": "15", "promotion_potential": "15"} for i in range(7)]
         self.summary.update(top_near_misses=near[:5], near_misses_reported=7, fit_notes={"ranked": True})
         self.write_summary()
         self.assertNotIn("Near 0", self.preview_message().get_body(preferencelist=("plain",)).get_content())
         self.set_delivery({**self.channels, "near_misses": "all", "max_items": 3})
-        body = self.preview_message().get_body(preferencelist=("plain",)).get_content()
-        for expected in ("NEAR MISSES (BEST AI FIT FIRST)", "Near 2", "AI note: Note 2.", "4 more in the reports."):
+        message = self.preview_message()
+        self.assertIn("· 7 near misses", str(message["Subject"]))
+        body = message.get_body(preferencelist=("plain",)).get_content()
+        for expected in ("NEAR MISSES (BEST AI FIT FIRST)", "Near 2", "Stretch fit · Not listed · GS-15 · closes",
+                         "AI note: Note 2.", "Main gap: Not shown on resume: Gap 2", "Why excluded: Reason 2",
+                         "4 more in the reports."):
             self.assertIn(expected, body)
         self.assertNotIn("Near 3", body)
+        self.assertNotIn("GS-15 (promotes", body)
 
     def test_near_misses_setting_is_checked(self):
         with self.assertRaises(ConfigError):

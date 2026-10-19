@@ -99,7 +99,7 @@ def grade(entry: dict) -> str:
     value = text(entry.get("grade"))
     pay_plan = text(entry.get("pay_plan"), "")
     if pay_plan and re.fullmatch(r"[\d\s–-]+", value):
-        return f"{pay_plan} {value}"
+        return f"{pay_plan}-{value}"
     return value
 
 
@@ -116,7 +116,8 @@ def _item(entry: dict, *, eligibility: bool = True) -> Item:
     # One line of facts keeps each job short enough to scan on a phone.
     facts = [text(entry.get("agency")), grade(entry)]
     promotion = text(entry.get("promotion_potential"), "")
-    if promotion and not promotion.lower().startswith(("none", "not listed")):
+    if (promotion and not promotion.lower().startswith(("none", "not listed"))
+            and re.findall(r"\d+", promotion) != re.findall(r"\d+", facts[-1])):
         facts[-1] += f" (promotes to {promotion})"
     facts.append(f"closes {close_date(entry.get('close_date'))}")
     level = text(entry.get("ai_level"), "")
@@ -131,6 +132,12 @@ def _item(entry: dict, *, eligibility: bool = True) -> Item:
         details.append(f"AI note: {text(entry.get('ai_note'))}")
     elif entry.get("ai_fit") and not level:
         details.append(f"AI fit: {text(entry.get('ai_fit'))}")
+    # The note opens with strengths, so a low rating shows its main gap too.
+    if level in ("Stretch", "Unlikely") and entry.get("ai_gap"):
+        details.append(f"Main gap: {text(entry.get('ai_gap'))}")
+    reasons = entry.get("exclusion_reasons")
+    if isinstance(reasons, list) and reasons:
+        details.append("Why excluded: " + "; ".join(text(r) for r in reasons[:3]))
     return Item(title, details, job_url(entry.get("url")))
 
 
@@ -151,6 +158,9 @@ def build_digest(manifest: dict, summary: dict, finished: datetime, *, max_items
         subject = f"USAJOBS — {day} — {matches} {'match' if matches == 1 else 'matches'}"
         if watch_count:
             subject += f" · {watch_count} watch"
+        near_count = count(summary.get("near_misses_reported"))
+        if near_misses == "all" and near_count:
+            subject += f" · {near_count} near {'miss' if near_count == 1 else 'misses'}"
         if new_total:
             subject += f" · {new_total} new"
         paragraphs = [

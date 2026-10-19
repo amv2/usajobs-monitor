@@ -373,10 +373,15 @@ def write_excel(path: Path, results: list[ReviewResult], config: dict[str, Any],
 
 def first_sentence(note: str, limit: int = 300) -> str:
     """The opening sentence of an AI fit note, for short messages such as email."""
-    note = " ".join(note.split())
-    match = re.match(r"(.+?[.!?])(?:\s|$)", note)
-    sentence = match.group(1) if match else note
-    return sentence if len(sentence) <= limit else sentence[:limit - 1].rstrip() + "…"
+    return shorten(re.split(r"(?<=[.!?])(?<!\b[A-Z]\.)\s", " ".join(note.split()), maxsplit=1)[0], limit)
+
+
+def shorten(value: str, limit: int) -> str:
+    """``value`` cut at a word boundary to at most ``limit`` characters, with an ellipsis."""
+    value = " ".join(value.split())
+    if len(value) <= limit:
+        return value
+    return value[:limit].rsplit(" ", 1)[0].rstrip(",;:") + "…"
 
 
 def summary_entry(result: ReviewResult, view: RunView, *, with_reasons: bool = False) -> dict[str, Any]:
@@ -399,6 +404,7 @@ def summary_entry(result: ReviewResult, view: RunView, *, with_reasons: bool = F
         "ai_gaps": view.fit_gap_text(result),
         "ai_level": FIT_LABELS.get(view.fits.get(job_id(job), ""), ""),
         "ai_note": first_sentence(view.fit_summaries.get(job_id(job), "")),
+        "ai_gap": shorten(view.fit_main_gaps.get(job_id(job), ""), 200),
         "qualification_summary": re.sub(r"\s+", " ", as_text(job.get("QualificationSummary"))).strip()[:QUALIFICATION_CHARS],
     }
     if with_reasons:
