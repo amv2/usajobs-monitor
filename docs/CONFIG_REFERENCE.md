@@ -171,6 +171,7 @@ Optional. Each `[delivery.<channel>]` table you add turns that channel on; with 
 | `max_attempts` | `3` | 1 to 5. Retries happen only when the server clearly did not take the message. |
 | `timeout_seconds` | `30` | 1 to 120, per connection. |
 | `max_items` | `5` | 1 to 25. Jobs listed per section (matches, watch list, new near misses). Chat messages also stop at the service's length limit and say how many more are in the reports. |
+| `near_misses` | `"new"` | `"new"` lists only near misses that are new since the last run. `"all"` lists the top near misses every run (best AI fit first when `ai.rank` is on), so the AI notes reach you without opening a report. |
 
 ### `[delivery.email]`
 

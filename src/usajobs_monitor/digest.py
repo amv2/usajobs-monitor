@@ -113,25 +113,29 @@ def _item(entry: dict, *, eligibility: bool = True) -> Item:
     flags = [f for f in entry.get("flags", []) if isinstance(f, str)] if isinstance(entry.get("flags"), list) else []
     if flags:
         title += f" [{', '.join(text(f) for f in flags)}]"
-    details = [
-        f"Agency: {text(entry.get('agency'))}",
-        f"Grade: {grade(entry)}",
-        f"Promotion potential / full performance level: {text(entry.get('promotion_potential'))}",
-        f"Closes: {close_date(entry.get('close_date'))}",
-    ]
+    # One line of facts keeps each job short enough to scan on a phone.
+    facts = [text(entry.get("agency")), grade(entry)]
+    promotion = text(entry.get("promotion_potential"), "")
+    if promotion and not promotion.lower().startswith(("none", "not listed")):
+        facts[-1] += f" (promotes to {promotion})"
+    facts.append(f"closes {close_date(entry.get('close_date'))}")
+    level = text(entry.get("ai_level"), "")
+    if level:
+        facts.insert(0, f"{level} fit")
+    details = [" · ".join(facts)]
     if eligibility:
         details.append(f"Eligibility: {text(entry.get('eligibility_basis'))}")
     if entry.get("your_status"):
         details.append(f"Your status: {text(entry.get('your_status'))}")
-    if entry.get("ai_fit"):
+    if entry.get("ai_note"):
+        details.append(f"AI note: {text(entry.get('ai_note'))}")
+    elif entry.get("ai_fit") and not level:
         details.append(f"AI fit: {text(entry.get('ai_fit'))}")
-    if entry.get("ai_gaps"):
-        details.append(f"AI gaps: {text(entry.get('ai_gaps'))}")
     return Item(title, details, job_url(entry.get("url")))
 
 
 def build_digest(manifest: dict, summary: dict, finished: datetime, *, max_items: int = 5,
-                 preview: bool = False) -> Digest:
+                 near_misses: str = "new", preview: bool = False) -> Digest:
     day = finished.date().isoformat()
     sections: list[Section] = []
     if manifest["status"] == "error":
@@ -181,10 +185,20 @@ def build_digest(manifest: dict, summary: dict, finished: datetime, *, max_items
         if watch:
             sections.append(Section(f"{watch_label} (fails only the pay rule)",
                                     [_item(e, eligibility=False) for e in watch[:max_items]]))
-        new_near = [e for e in _entries(summary, "top_near_misses")
-                    if isinstance(e.get("flags"), list) and "NEW" in e["flags"]]
-        if new_near:
-            sections.append(Section("New near misses", [_item(e, eligibility=False) for e in new_near[:max_items]]))
+        near = _entries(summary, "top_near_misses")
+        if near_misses == "all":
+            if near:
+                ranked = isinstance(summary.get("fit_notes"), dict) and summary["fit_notes"].get("ranked") is True
+                section = Section("Near misses (best AI fit first)" if ranked else "Near misses",
+                                  [_item(e, eligibility=False) for e in near[:max_items]])
+                more = count(summary.get("near_misses_reported")) - len(section.items)
+                if more > 0:
+                    section.lines.append(f"{more} more in the reports.")
+                sections.append(section)
+        else:
+            new_near = [e for e in near if isinstance(e.get("flags"), list) and "NEW" in e["flags"]]
+            if new_near:
+                sections.append(Section("New near misses", [_item(e, eligibility=False) for e in new_near[:max_items]]))
         dropped = _entries(summary, "dropped_since_last_run")
         if dropped:
             sections.append(Section("Dropped since last run", lines=[
@@ -212,7 +226,9 @@ def html_text(digest: Digest, note: str = "") -> str:
     """The email's HTML part: the same digest, styled inline so mail clients keep the look."""
     style = HTML_STYLE
     esc = html.escape
-    parts = ["<!doctype html><html><body style=\"" + style["body"] + "\">", f'<div style="{style["wrap"]}">',
+    parts = ['<!doctype html><html><head><meta charset="utf-8">'
+             '<meta name="viewport" content="width=device-width, initial-scale=1"></head>'
+             f'<body style="{style["body"]}">', f'<div style="{style["wrap"]}">',
              f'<h1 style="{style["h1"]}">{esc(digest.subject)}</h1>']
     parts.extend(f'<p style="{style["fact"]}">{esc(p)}</p>' for p in [*digest.paragraphs, *([note] if note else [])])
     for section in digest.sections:

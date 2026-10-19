@@ -635,7 +635,8 @@ def deliver(run_dir: Path, settings: Settings, *, env: Mapping[str, str] | None 
     try:
         run = validated_run(run_dir)
         digest = build_digest(run.manifest, run.summary, run.finished,
-                              max_items=options.get("max_items", 5), preview=dry_run)
+                              max_items=options.get("max_items", 5),
+                              near_misses=options.get("near_misses", "new"), preview=dry_run)
         if dry_run:
             folder = run.path / PREVIEW_DIR
             folder.mkdir(exist_ok=True)

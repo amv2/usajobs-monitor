@@ -26,7 +26,7 @@ from .config import target_label
 from .presets import preset_labels
 from .reasons import code_of
 from .review import SENIOR_EXECUTIVE_PAY_PLANS, ReviewResult, applicant_label, target_agency_hit
-from .tracking import CLOSING_SOON_DAYS, RunView, baseline_text, near_miss_reason_text, watch_list_label
+from .tracking import CLOSING_SOON_DAYS, FIT_LABELS, RunView, baseline_text, near_miss_reason_text, watch_list_label
 
 WORD_NAME = "usajobs_briefing.docx"
 EXCEL_NAME = "usajobs_tracker.xlsx"
@@ -371,6 +371,14 @@ def write_excel(path: Path, results: list[ReviewResult], config: dict[str, Any],
     wb.save(path)
 
 
+def first_sentence(note: str, limit: int = 300) -> str:
+    """The opening sentence of an AI fit note, for short messages such as email."""
+    note = " ".join(note.split())
+    match = re.match(r"(.+?[.!?])(?:\s|$)", note)
+    sentence = match.group(1) if match else note
+    return sentence if len(sentence) <= limit else sentence[:limit - 1].rstrip() + "…"
+
+
 def summary_entry(result: ReviewResult, view: RunView, *, with_reasons: bool = False) -> dict[str, Any]:
     job = result.job
     entry = {
@@ -389,6 +397,8 @@ def summary_entry(result: ReviewResult, view: RunView, *, with_reasons: bool = F
         "your_status": view.your_status(result),
         "ai_fit": view.fit_text(result),
         "ai_gaps": view.fit_gap_text(result),
+        "ai_level": FIT_LABELS.get(view.fits.get(job_id(job), ""), ""),
+        "ai_note": first_sentence(view.fit_summaries.get(job_id(job), "")),
         "qualification_summary": re.sub(r"\s+", " ", as_text(job.get("QualificationSummary"))).strip()[:QUALIFICATION_CHARS],
     }
     if with_reasons:

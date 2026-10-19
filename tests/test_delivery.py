@@ -177,6 +177,34 @@ class EmailTests(DeliveryFixture):
             self.assertIn(expected, body)
         self.assertNotIn("Old near", body)
 
+    def test_entries_are_compact_with_one_sentence_ai_note(self):
+        self.summary["matches"][0].update(ai_level="Possible", ai_fit="Possible (resume: A)",
+                                          ai_note="You meet the grade-level time.", ai_gaps="Not shown: X")
+        self.write_summary()
+        message = self.preview_message()
+        body = message.get_body(preferencelist=("plain",)).get_content()
+        self.assertIn("Possible fit · Example agency · GS-13 (promotes to GS-14) · closes Oct 15, 2026", body)
+        self.assertIn("AI note: You meet the grade-level time.", body)
+        for left_to_reports in ("Not shown: X", "resume: A", "Promotion potential"):
+            self.assertNotIn(left_to_reports, body)
+        markup = message.get_body(preferencelist=("html",)).get_content()
+        self.assertIn('<meta name="viewport" content="width=device-width, initial-scale=1">', markup)
+
+    def test_near_misses_all_lists_ranked_entries_every_run(self):
+        near = [{"title": f"Near {i}", "flags": [], "ai_level": "Stretch", "ai_note": f"Note {i}."} for i in range(7)]
+        self.summary.update(top_near_misses=near[:5], near_misses_reported=7, fit_notes={"ranked": True})
+        self.write_summary()
+        self.assertNotIn("Near 0", self.preview_message().get_body(preferencelist=("plain",)).get_content())
+        self.set_delivery({**self.channels, "near_misses": "all", "max_items": 3})
+        body = self.preview_message().get_body(preferencelist=("plain",)).get_content()
+        for expected in ("NEAR MISSES (BEST AI FIT FIRST)", "Near 2", "AI note: Note 2.", "4 more in the reports."):
+            self.assertIn(expected, body)
+        self.assertNotIn("Near 3", body)
+
+    def test_near_misses_setting_is_checked(self):
+        with self.assertRaises(ConfigError):
+            self.set_delivery({**self.channels, "near_misses": "some"})
+
     def test_html_escapes_content_and_omits_untrusted_urls(self):
         self.summary["matches"][0].update(title="<script>x</script>", url="https://evil.example/job/1")
         self.write_summary()

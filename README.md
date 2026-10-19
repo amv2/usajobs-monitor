@@ -313,7 +313,7 @@ to_addresses  = ["you@example.com"]
 server = "https://ntfy.sh"
 ```
 
-Email carries the summary with each report in `report.formats` attached (the HTML digest's content is also the email's own HTML body). Discord, Slack and ntfy get a short digest: counts, the top matches with their links, and anything new. Every key is in the [config reference](docs/CONFIG_REFERENCE.md#delivery).
+Email carries a short digest with each report in `report.formats` attached. The digest has the counts and one compact entry per listed job: its AI fit level when fit notes are on, agency, grade, closing date, the first sentence of the AI note and a link, so it reads well on a phone; the full notes stay in the reports. Discord, Slack and ntfy get the same digest, cut to fit the service's length limit. Near misses are listed only when new, unless you set `delivery.near_misses = "all"`. Every key is in the [config reference](docs/CONFIG_REFERENCE.md#delivery).
 
 **Secrets go in environment variables or your keychain**, like your API key ([step 3](#or-keep-them-in-your-system-keychain)). A password or webhook URL in the config file is an error, so a config you share or commit can't leak one.
 
