@@ -157,7 +157,7 @@ def _excluded_section(heading: str, entries: list[dict]) -> Section:
     shared = frozenset.intersection(*(frozenset(_reasons(e)) for e in entries)) if len(entries) > 1 else frozenset()
     section = Section(heading, [_item(e, eligibility=False, shared=shared) for e in entries])
     if shared:
-        section.intro = "All excluded for: " + "; ".join(text(r) for r in _reasons(entries[0]) if r in shared)
+        section.intro = "Every job below was excluded for: " + "; ".join(text(r) for r in _reasons(entries[0]) if r in shared)
     return section
 
 

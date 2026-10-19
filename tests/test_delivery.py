@@ -201,7 +201,7 @@ class EmailTests(DeliveryFixture):
         message = self.preview_message()
         self.assertIn("· 7 near misses", str(message["Subject"]))
         body = message.get_body(preferencelist=("plain",)).get_content()
-        for expected in ("NEAR MISSES (BEST AI FIT FIRST)\r\nAll excluded for: Pay\r\n", "Near 2",
+        for expected in ("NEAR MISSES (BEST AI FIT FIRST)\r\nEvery job below was excluded for: Pay\r\n", "Near 2",
                          "Stretch fit · Not listed · NH-04 · closes", "Main gap: Gap 2 (not on resume)",
                          "Also excluded: Reason 2", "4 more in the reports."):
             self.assertIn(expected, body)
