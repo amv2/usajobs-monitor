@@ -159,6 +159,7 @@ When presets disagree, `excepted` beats `competitive` for `service` (an excepted
 |---|---|---|
 | `report.title` | `"USAJOBS Job Monitor"` | Title on every report. The "Active filters" paragraph is generated from this config. |
 | `report.formats` | `["docx", "xlsx"]` | Which reports to write: `html` (`usajobs_digest.html`, a self-contained page that opens in any browser), `csv` (`usajobs_jobs.csv`, every reviewed job with the list it landed on), `docx` (Word briefing), `xlsx` (Excel tracker). The default keeps older configs writing what they always did; `init` writes `["html", "csv"]`. |
+| `report.closing_soon_days` | `3` | 1 to 14. A listed job closing within this many days (counting today) is flagged CLOSING SOON, and delivered messages open with a "Closing soon" list of those jobs, soonest first, labeled "closes today", "closes tomorrow" or the weekday. That list is not cut by `delivery.max_items`. Jobs you marked `applied` are left out. Set it to the longest gap between your runs plus a day or two, so one missed run still flags a deadline: 3 to 5 for a Monday/Wednesday/Friday schedule, 8 or more for weekly. |
 | `scoring.*` | see sample | Ranking weights and pay tiers. Optional; the defaults equal today's behavior. |
 
 ## `[delivery]`

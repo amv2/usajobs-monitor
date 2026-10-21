@@ -12,15 +12,16 @@ import html
 import os
 import re
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime
 from email import policy
 from email.message import EmailMessage
 from email.utils import format_datetime
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
+from .config import CLOSING_SOON_DAYS
 from .reports import CSV_NAME, EXCEL_NAME, HTML_NAME, HTML_STYLE, REPORT_LABELS, WORD_NAME
-from .tracking import CLOSING_SOON_DAYS, baseline_text
+from .tracking import baseline_text, closes_in_text
 
 # File name -> (MIME type, the ZIP member an Office file must contain, or "").
 ATTACHMENT_TYPES = {
@@ -152,6 +153,33 @@ def _reasons(entry: dict) -> list[str]:
     return [r for r in reasons if isinstance(r, str)] if isinstance(reasons, list) else []
 
 
+CLOSING_SOON_LIMIT = 25
+
+
+def _closing_item(entry: dict, watch_label: str) -> Item:
+    """One short line per closing posting: how soon, which list, and the basics."""
+    title = text(entry.get("title"))
+    flags = [text(f) for f in entry.get("flags", []) if isinstance(f, str) and f != "CLOSING SOON"] \
+        if isinstance(entry.get("flags"), list) else []
+    if flags:
+        title += f" [{', '.join(flags)}]"
+    try:
+        closes = date.fromisoformat(str(entry.get("close_date")).partition("T")[0])
+        days = count(entry.get("days_left"))
+        when = closes_in_text(days, closes) + (f" ({closes:%b} {closes.day})" if days <= 1 else "")
+    except ValueError:
+        when = f"closes {close_date(entry.get('close_date'))}"
+    facts = [when]
+    listed = {"match": "Match", "watch": watch_label, "near_miss": "Near miss"}.get(entry.get("list"))
+    if listed:
+        facts.append(listed)
+    level = text(entry.get("ai_level"), "")
+    if level:
+        facts.append(f"{level} fit")
+    facts += [text(entry.get("agency")), grade(entry)]
+    return Item(title, [" · ".join(facts)], job_url(entry.get("url")))
+
+
 def _excluded_section(heading: str, entries: list[dict]) -> Section:
     """A watch list or near-miss section. A reason every listed job shares is said once, above the jobs."""
     shared = frozenset.intersection(*(frozenset(_reasons(e)) for e in entries)) if len(entries) > 1 else frozenset()
@@ -183,6 +211,9 @@ def build_digest(manifest: dict, summary: dict, finished: datetime, *, max_items
             subject += f" · {near_count} near {'miss' if near_count == 1 else 'misses'}"
         if new_total:
             subject += f" · {new_total} new"
+        closing = _entries(summary, "closing_soon_jobs")
+        if closing:
+            subject += f" · {len(closing)} closing soon"
         paragraphs = [
             f"Reviewed {summary['jobs_reviewed']} jobs across {summary['usajobs_searches']} searches.",
             f"Matches: {matches}. Target-agency matches: {summary['target_agency_matches']}. "
@@ -196,7 +227,8 @@ def build_digest(manifest: dict, summary: dict, finished: datetime, *, max_items
             dropped = summary.get("dropped_since_last_run")
             paragraphs.append(
                 f"New since last run: {count(new.get('matches'))} matches, {count(new.get('watch_list'))} watch list, "
-                f"{count(new.get('near_misses'))} near misses. Closing within {CLOSING_SOON_DAYS} days: "
+                f"{count(new.get('near_misses'))} near misses. "
+                f"Closing within {count(summary.get('closing_soon_days')) or CLOSING_SOON_DAYS} days: "
                 f"{count(summary.get('closing_soon'))}. "
                 f"Dropped since last run: {len(dropped) if isinstance(dropped, list) else 0}."
             )
@@ -205,6 +237,13 @@ def build_digest(manifest: dict, summary: dict, finished: datetime, *, max_items
         else:
             paragraphs.append("Review eligibility and deadlines before applying.")
 
+        # Deadlines lead, uncapped by max_items, so a posting low in its list still shows.
+        if closing:
+            section = Section("Closing soon (not yet applied)",
+                              [_closing_item(e, watch_label) for e in closing[:CLOSING_SOON_LIMIT]])
+            if len(closing) > CLOSING_SOON_LIMIT:
+                section.lines.append(f"{len(closing) - CLOSING_SOON_LIMIT} more in the reports.")
+            sections.append(section)
         entries = _entries(summary, "matches")
         if entries:
             section = Section("Matches", [_item(e) for e in entries[:max_items]])
