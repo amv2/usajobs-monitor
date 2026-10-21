@@ -17,7 +17,7 @@ Template: [examples/usajobs-monitor.example.toml](../examples/usajobs-monitor.ex
 3. **Match**: no reasons.
 4. **Watch list**: the *only* reason is pay, and the posting's grade range includes a `watch_list` grade at a `watch_list` pay plan.
 5. **Near miss**: failed only on pay, eligibility route, or appointment type, and clears the near-miss pay and grade floors. Any **hard-no** reason (mismatch, executive, excluded series, another agency's internal posting, no role signal) keeps it off this list.
-6. **Hidden**: anything marked `not_interested` in the decisions file, whatever its list.
+6. **Hidden**: anything marked `not_interested`, `rejected` or `withdrawn` in the decisions file, whatever its list.
 
 ## Credentials (environment or keychain)
 
@@ -35,7 +35,7 @@ With the optional extra (`pip install "usajobs-monitor[keyring]"`), any credenti
 | Key | Default | Meaning |
 |---|---|---|
 | `reports_dir` | `"reports"` | Where the reports (see `report.formats`), `usajobs_last_run.json` and run history go. |
-| `decisions_file` | `"job_decisions.csv"` | Your decisions by control number: `applied`, `watching`, or `not_interested` (the not-interested list; those postings are hidden on every run). Columns: `control_number,status,note`; other columns are ignored and kept. `usajobs-monitor decide` edits it for you and also fills `title` and `decided_on`. |
+| `decisions_file` | `"job_decisions.csv"` | Your decisions by control number. `applied`, `interview` and `offer` are applications in progress and `watching` is a job you're keeping an eye on; all four are flagged on every run. `not_interested`, `rejected` and `withdrawn` postings are hidden on every run. Columns: `control_number,status,note`, plus `title`, `agency`, `applied_on` (the day you applied, kept through later status changes) and `decided_on` (the day of the latest change), which `usajobs-monitor decide` fills in and adds to the file if they're missing. Other columns are kept. A row marked `applied` with no `applied_on` uses its `decided_on`. `usajobs-monitor decide` with no arguments lists active applications with days waiting and marks any with no update in 30 days. |
 | `resume_folder` | `""` | Optional. PDFs found here are listed in the briefing. |
 
 Relative paths resolve against the config file's folder, not the current directory.

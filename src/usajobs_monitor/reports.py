@@ -148,8 +148,8 @@ def active_filters_text(config: dict[str, Any], decisions_name: str) -> list[str
     line += ". Hard-no failures (mismatches, executive roles, excluded series, other agencies' internal postings, no role signal) are never listed."
     lines.append(line)
 
-    lines.append(f"Your decisions: postings marked not interested in {decisions_name} are hidden; "
-                 "applied and watching postings are flagged.")
+    lines.append(f"Your decisions: postings marked not interested, rejected or withdrawn in {decisions_name} "
+                 "are hidden; applied, interview, offer and watching postings are flagged.")
     ai = config.get("ai") or {}
     if ai.get("rank") and ai.get("fit_notes") and ai.get("send_resume") is True:
         lines.append("AI ranking: within each list, postings the AI rated a stronger fit come first, "
@@ -227,7 +227,7 @@ def write_word(path: Path, results: list[ReviewResult], config: dict[str, Any], 
     summary.add_run(f"\nClosing within {CLOSING_SOON_DAYS} days: {view.closing_soon_count()}")
     summary.add_run(f"\nDropped since last run: {len(view.dropped)}")
     if view.hidden:
-        summary.add_run(f"\nHidden as not interested: {len(view.hidden)}")
+        summary.add_run(f"\nHidden by your decisions: {len(view.hidden)}")
     summary.add_run(f"\n{resume_note(resumes, len(view.fits))}")
 
     if not view.matches:
@@ -356,7 +356,7 @@ def write_excel(path: Path, results: list[ReviewResult], config: dict[str, Any],
         ("New since last run", f"baseline run; {baseline_text(view.history_state)}" if view.baseline else
          f"{view.new_count(view.matches)} matches, {view.new_count(view.watch)} watch list, {view.new_count(view.near)} near misses"),
         ("Dropped since last run", len(view.dropped)),
-        ("Hidden as not interested", len(view.hidden)),
+        ("Hidden by your decisions", len(view.hidden)),
         ("Resumes", resume_note(resumes, len(view.fits))),
         ("Salary rule", f"Upper salary must exceed {_money(config['filters'].get('salary_upper_must_exceed'))}"),
         *([("Pay target", target_label(config))] if target_label(config) else []),
@@ -528,7 +528,7 @@ def write_html(path: Path, results: list[ReviewResult], config: dict[str, Any], 
     else:
         body.append(f'<p style="{HTML_STYLE["muted"]}">New since last run: {view.new_count(view.matches)} matches, '
                     f"{view.new_count(view.watch)} watch list, {view.new_count(view.near)} near misses. "
-                    f"Dropped: {len(view.dropped)}. Hidden as not interested: {len(view.hidden)}.</p>")
+                    f"Dropped: {len(view.dropped)}. Hidden by your decisions: {len(view.hidden)}.</p>")
 
     def section(heading: str, note: str, items: list[str], empty: str) -> None:
         body.append(f'<h2 style="{HTML_STYLE["h2"]}">{esc(heading)}</h2>')

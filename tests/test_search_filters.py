@@ -379,6 +379,19 @@ class HistoryAndDecisionTests(unittest.TestCase):
         self.assertEqual(view.your_status(view.matches[0]), "applied (10-15)")
         self.assertEqual(view.history["jobs"]["1"]["list"], "hidden")
 
+    def test_rejected_and_withdrawn_hide_and_application_statuses_flag(self):
+        decisions = {"1": {"status": "rejected", "note": ""}, "2": {"status": "withdrawn", "note": ""},
+                     "3": {"status": "interview", "note": "", "applied_on": "2026-09-01"},
+                     "4": {"status": "offer", "note": "GS-14"}}
+        view = self.view([result(str(n), [], number=n) for n in (1, 2, 3, 4)], decisions=decisions)
+        self.assertEqual(sorted(r.job["PositionTitle"] for r in view.hidden), ["1", "2"])
+        self.assertEqual(view.flags["3"], ["INTERVIEW"])
+        self.assertEqual(view.flags["4"], ["OFFER"])
+        by_title = {r.job["PositionTitle"]: r for r in view.matches}
+        self.assertEqual(view.your_status(by_title["3"]), "interview (applied 2026-09-01)")
+        self.assertEqual(view.your_status(by_title["4"]), "offer (GS-14)")
+        self.assertEqual(view.history["jobs"]["1"]["list"], "hidden")
+
     def test_load_decisions(self):
         import tempfile
         from pathlib import Path
@@ -387,8 +400,8 @@ class HistoryAndDecisionTests(unittest.TestCase):
             path.write_text("control_number,status,note,updated\n886889900,Not Interested,,2026-10-16\n"
                             "123,applied,sent,\nabc,applied,,\n456,maybe,,\n,,,\n", encoding="utf-8")
             decisions, warnings = tracking.load_decisions(path)
-        self.assertEqual(decisions, {"886889900": {"status": "not_interested", "note": ""},
-                                     "123": {"status": "applied", "note": "sent"}})
+        self.assertEqual({n: (d["status"], d["note"]) for n, d in decisions.items()},
+                         {"886889900": ("not_interested", ""), "123": ("applied", "sent")})
         self.assertEqual(len(warnings), 2)
         self.assertEqual(tracking.load_decisions(Path("/nonexistent/x.csv")), ({}, []))
 
