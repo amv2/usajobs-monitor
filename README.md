@@ -2,7 +2,7 @@
 
 A scheduled job search for [USAJOBS](https://www.usajobs.gov) that does the filtering a keyword search can't. You describe the jobs you want and the hiring paths you qualify for in one config file, and each run gives you a short list of postings worth reading, a watch list, and the near misses, with a reason for every job it set aside.
 
-> **Status:** early, but complete for everyday use. The core search, filtering, tracking and reports are ported from a personal tool that runs three times a week. Delivery by email, Discord, Slack and ntfy is in, it can run on GitHub Actions or in Docker, `usajobs-monitor init` sets up a profile for you, and an optional AI add-on rates your resume against each job, lists stronger fits first and serves the search to AI assistants over MCP. See [Roadmap](#roadmap) for what's next.
+> **Status:** early, but complete for everyday use. Search, filtering, tracking, reports, delivery (email, Discord, Slack, ntfy), GitHub Actions and Docker are in. An optional AI add-on rates your resume against each job. See [Roadmap](#roadmap).
 
 ## What a report looks like
 
