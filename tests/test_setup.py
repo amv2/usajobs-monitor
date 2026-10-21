@@ -259,7 +259,9 @@ class DecideTests(unittest.TestCase):
         # Title and agency carry over when a later change can't look them up.
         self.assertEqual((decision["title"], decision["agency"]), ("Budget Analyst", "Example Agency"))
         save_decision(self.decisions, "111", "rejected", today=date(2026, 10, 1))
-        self.assertEqual(load_decisions(self.decisions)[0]["111"]["applied_on"], "2026-09-01")
+        decision = load_decisions(self.decisions)[0]["111"]
+        self.assertEqual(decision["applied_on"], "2026-09-01")
+        self.assertEqual(decision["note"], "panel 10/3")  # no new note keeps the old one
 
     def test_applied_date_for_older_files_and_backfill(self):
         # Written before applied_on existed: decided_on is the day it was marked applied.
@@ -311,6 +313,12 @@ class DecideTests(unittest.TestCase):
         code, out, _ = self.cli("decide")
         self.assertEqual(code, 0)
         self.assertIn("Active applications:", out)
+
+    def test_list_fills_missing_titles_from_history(self):
+        self.decisions.write_text("control_number,status,note\n812345600,not_interested,\n", encoding="utf-8")
+        code, out, _ = self.cli("decide")
+        self.assertEqual(code, 0)
+        self.assertIn("Budget Analyst, Example Agency", out)
 
 
 if __name__ == "__main__":

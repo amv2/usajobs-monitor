@@ -151,7 +151,8 @@ def save_decision(path: Path, number: str, status: str, note: str = "", title: s
 
     ``decided_on`` is the day of the latest change. ``applied_on`` is set the day a job
     is marked applied and carried over through later changes (interview, rejected, ...).
-    Pass ``applied_on`` for an application made before you started tracking it."""
+    Pass ``applied_on`` for an application made before you started tracking it. With no
+    new note, the previous note is kept."""
     number = number.strip()
     if not number.isdigit():
         raise ValueError("the control number is the number in the job's USAJOBS link, e.g. 812345600")
@@ -178,7 +179,8 @@ def save_decision(path: Path, number: str, status: str, note: str = "", title: s
         applied = applied_on.isoformat() if applied_on else _applied_on(previous or {})
         if not applied and status == "applied":
             applied = today.isoformat()
-        row = {"control_number": number, "status": status, "note": note.strip(),
+        row = {"control_number": number, "status": status,
+               "note": note.strip() or str((previous or {}).get("note") or ""),
                "title": title or str((previous or {}).get("title") or ""),
                "agency": agency or str((previous or {}).get("agency") or ""),
                "applied_on": applied, "decided_on": today.isoformat()}

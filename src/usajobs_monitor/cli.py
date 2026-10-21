@@ -196,6 +196,11 @@ def cmd_decide(args: argparse.Namespace) -> int:
         _print_warnings(warnings)
         if not decisions:
             print(f"No decisions yet in {path}.")
+        # Rows saved before title and agency were stored: fill them from recent run history.
+        seen_jobs = (load_history(settings.history_path) or {}).get("jobs") or {}
+        for number, decision in decisions.items():
+            for key in ("title", "agency"):
+                decision[key] = decision.get(key) or str((seen_jobs.get(number) or {}).get(key) or "")
         for line in decision_lines(decisions, date.today()):
             print(line)
         return 0
