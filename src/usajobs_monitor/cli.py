@@ -517,7 +517,14 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+    parser = build_parser()
+    args, extra = parser.parse_known_args(argv)
+    if extra:
+        # Before Python 3.12, note words after an option (decide 1 applied --applied-on DATE sent late)
+        # are left over instead of joining the note.
+        if getattr(args, "func", None) is not cmd_decide or any(word.startswith("-") for word in extra):
+            parser.error("unrecognized arguments: " + " ".join(extra))
+        args.note = [*args.note, *extra]
     try:
         if hasattr(args, "profile") and getattr(args, "resolve_config", True):
             from . import profiles
