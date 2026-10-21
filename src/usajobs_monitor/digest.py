@@ -154,6 +154,7 @@ def _reasons(entry: dict) -> list[str]:
 
 
 CLOSING_SOON_LIMIT = 25
+CLOSING_SOON_HEADING = "Closing soon (not yet applied)"
 
 
 def _closing_item(entry: dict, watch_label: str) -> Item:
@@ -239,7 +240,7 @@ def build_digest(manifest: dict, summary: dict, finished: datetime, *, max_items
 
         # Deadlines lead, uncapped by max_items, so a posting low in its list still shows.
         if closing:
-            section = Section("Closing soon (not yet applied)",
+            section = Section(CLOSING_SOON_HEADING,
                               [_closing_item(e, watch_label) for e in closing[:CLOSING_SOON_LIMIT]])
             if len(closing) > CLOSING_SOON_LIMIT:
                 section.lines.append(f"{len(closing) - CLOSING_SOON_LIMIT} more in the reports.")
@@ -360,9 +361,14 @@ def chat_text(digest: Digest, *, limit: int, link: str = "{url}", bold: str = "{
     footer = f"\nRun: {escape(digest.run_id)}"
     budget = limit - len(footer) - 60  # room for the "more entries" line
     skipped = 0
+    # Chat has little room, so a job listed under Closing soon is not repeated below it.
+    closing = {i.url for s in digest.sections if s.heading == CLOSING_SOON_HEADING for i in s.items if i.url}
     for section in digest.sections:
+        items = [i for i in section.items if section.heading == CLOSING_SOON_HEADING or i.url not in closing]
+        if section.items and not items and not section.lines:
+            continue
         entries = [escape(section.intro)] if section.intro else []
-        for item in section.items:
+        for item in items:
             facts = [d for d in item.details if not d.startswith(("Promotion", "Your status"))]
             line = f"• {escape(item.title)} — " + "; ".join(escape(f) for f in facts)
             if item.url:

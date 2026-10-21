@@ -86,7 +86,7 @@ class DigestTests(unittest.TestCase):
     def test_closing_section_leads_and_ignores_max_items(self):
         jobs = [result(f"job {n}", [], number=n, close=f"2026-10-{16 + n}", score=10 - n) for n in (1, 2, 3)]
         found = view(jobs, decisions={"9": {"status": "applied", "note": ""}})
-        digest = self.digest(found)
+        digest = self.digest(found, matches=runner.closing_soon_entries(found))
         self.assertIn("3 closing soon", digest.subject)
         first = digest.sections[0]
         self.assertEqual(first.heading, "Closing soon (not yet applied)")
@@ -95,7 +95,14 @@ class DigestTests(unittest.TestCase):
         self.assertTrue(first.items[1].details[0].startswith("closes Sun Oct 18 · Match"))
         self.assertTrue(first.items[2].details[0].startswith("closes Mon Oct 19 · Match"))
         self.assertNotIn("CLOSING SOON", first.items[0].title)
-        self.assertIn("closing soon", chat_text(digest, limit=2000).lower())
+        chat = chat_text(digest, limit=2000)
+        self.assertIn("closing soon", chat.lower())
+        # Chat lists each job once; email keeps the full entry in its own section too.
+        self.assertEqual(chat.count("https://www.usajobs.gov/job/1"), 1)
+        self.assertEqual(sum(i.url.endswith("/job/1") for s in digest.sections for i in s.items), 2)
+        # A section left with nothing new to say is dropped from chat.
+        only = self.digest(found, matches=runner.closing_soon_entries(found)[:1])
+        self.assertNotIn("__Matches__", chat_text(only, limit=2000, heading="__{}__"))
 
     def test_no_closing_jobs_no_section(self):
         digest = self.digest(view([result("later", [], number=1)]))
