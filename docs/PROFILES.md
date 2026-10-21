@@ -1,6 +1,6 @@
 # Configuring your profile
 
-Details for the profile file that `usajobs-monitor init` creates. Moved here from the README to keep the main page short. Start with the [README quickstart](../README.md#quickstart) if you haven't run the tool yet.
+Details for the profile file that `usajobs-monitor init` creates. Start with the [README quickstart](../README.md#quickstart) if you haven't run the tool yet.
 
 ## Config sections
 
@@ -62,7 +62,7 @@ How the main settings work together:
 
 **Tip:** run once, then read the near misses and the reason each one failed. They show you what each setting is filtering out, which is the fastest way to tune it.
 
-### Pay floors from a GS grade
+## Pay floors from a GS grade
 
 Instead of typing dollar amounts, name the grade you want and where you work. The tool looks up OPM's General Schedule pay table for that locality pay area and computes the floors. The tables ship with the tool, one per year, so no network call is made.
 
@@ -90,7 +90,7 @@ usajobs-monitor pay-table Seattle     # one area's GS-1 to GS-15 rates
 
 The 2026 table comes from [Executive Order 14368](https://public-inspection.federalregister.gov/2025-23844.pdf) (Schedule 1 for base rates, Schedule 9 for locality percentages, Schedule 5 for the level IV pay cap) and matches OPM's [published 2026 tables](https://www.opm.gov/policy-data-oversight/pay-leave/salaries-wages/2026/general-schedule/). Rates are computed the way OPM does it: base × (1 + locality %), rounded to the dollar, capped at Executive Schedule level IV. Special rates, LEO rates and non-GS pay systems aren't modeled; those postings are judged by their posted pay.
 
-### Applicant types
+## Applicant types
 
 Who may apply is set per announcement through USAJOBS *hiring paths* ("This job is open to"). Instead of working out which paths apply to you, pick one or more presets:
 
@@ -113,7 +113,7 @@ presets = ["veteran", "military-spouse"]
 
 Presets combine, and anything you set yourself under `[eligibility]` wins. `check-config` prints what the presets filled in. A preset only says which postings you *could* apply to; each route has its own conditions (service length, time limits, documents), so read the announcement's "Who may apply" before applying. The [config reference](CONFIG_REFERENCE.md#applicant-type-presets) has the details for each one.
 
-### Several profiles
+## Several profiles
 
 One install can run several searches, for example one for you and one for a spouse. Each profile is a config file in your profiles folder with its own reports, history and decisions:
 

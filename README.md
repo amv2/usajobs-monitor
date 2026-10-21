@@ -2,7 +2,7 @@
 
 A scheduled job search for [USAJOBS](https://www.usajobs.gov) that does the filtering a keyword search can't. You describe the jobs you want and the hiring paths you qualify for in one config file, and each run gives you a short list of postings worth reading, a watch list, and the near misses, with a reason for every job it set aside.
 
-> **Status:** early, but complete for everyday use. Search, filtering, tracking, reports, delivery (email, Discord, Slack, ntfy), GitHub Actions and Docker are in. An optional AI add-on rates your resume against each job. See [Roadmap](#roadmap).
+> **Status:** early, but complete for everyday use. Search, filtering, tracking, reports, delivery (email, Discord, Slack, ntfy), GitHub Actions and Docker are in. An optional AI add-on rates your resume against each job and lists stronger fits first. See [Roadmap](#roadmap).
 
 ## What a report looks like
 
@@ -22,11 +22,12 @@ python3 -m venv .venv && source .venv/bin/activate && pip install -e .
 export USAJOBS_EMAIL="you@example.com"        # the address you registered with
 export USAJOBS_API_KEY="paste-your-key-here"
 
-usajobs-monitor init      # six questions, writes your profile
-usajobs-monitor run       # search, filter, write reports (the init output shows the exact flags)
+usajobs-monitor init --profile me                      # six questions, writes your profile
+usajobs-monitor check-config --profile me              # confirm credentials and see the pay floors
+usajobs-monitor run --preview-delivery --profile me    # search now; alerts are written, not sent
 ```
 
-Open the HTML digest in your reports folder. Then read the near misses: each one says which single check it failed, which is the fastest way to tune your profile. To run it automatically, see [step 7](#7-run-it-on-a-schedule). The numbered sections below cover each step in detail.
+Open `usajobs_digest.html` in `me/reports` inside your [profiles folder](docs/PROFILES.md#several-profiles). Then read the near misses: each one says which single check it failed, which is the fastest way to tune your profile. To run it automatically, see [step 7](#7-run-it-on-a-schedule). The numbered sections below cover each step in detail.
 
 ## What it does
 
