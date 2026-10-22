@@ -1,6 +1,6 @@
 """Generated report text, plus an offline end-to-end run that must pass validation."""
 
-from datetime import date, datetime
+from datetime import datetime
 import json
 from pathlib import Path
 import tempfile
