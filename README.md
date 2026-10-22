@@ -6,18 +6,17 @@ A scheduled job search for [USAJOBS](https://www.usajobs.gov) that does the filt
 
 ## What a report looks like
 
-![The HTML digest from a sample follow-up run: three matches with NEW, CLOSING SOON and VERIFY ELIGIBILITY badges, a GS/GG-15 watch list and a near miss](docs/sample/digest.png)
+![The HTML digest from a sample follow-up run: three matches with NEW, CLOSING SOON and VERIFY ELIGIBILITY badges, a GS/GG-15 watch list and a near miss](https://raw.githubusercontent.com/amv2/usajobs-monitor/main/docs/sample/digest.png)
 
-This is the HTML digest from [a sample run](docs/sample/usajobs_digest.html) with made-up postings and agencies. [`scripts/make_sample_report.py`](scripts/make_sample_report.py) regenerates it offline.
+This is the HTML digest from [a sample run](https://github.com/amv2/usajobs-monitor/blob/main/docs/sample/usajobs_digest.html) with made-up postings and agencies. [`scripts/make_sample_report.py`](https://github.com/amv2/usajobs-monitor/blob/main/scripts/make_sample_report.py) regenerates it offline.
 
 ## Quickstart
 
-About five minutes once you have an API key. Needs Python 3.11 or newer.
+About five minutes once you have an API key. Needs Python 3.11 or newer and [pipx](https://pipx.pypa.io/stable/installation/).
 
 ```bash
 # 1. Get a free API key: https://developer.usajobs.gov/apirequest/ (it's emailed to you)
-git clone https://github.com/amv2/usajobs-monitor.git && cd usajobs-monitor
-python3 -m venv .venv && source .venv/bin/activate && pip install -e .
+pipx install usajobs-monitor                  # step 2 covers pip, uv and installing from source
 
 export USAJOBS_EMAIL="you@example.com"        # the address you registered with
 export USAJOBS_API_KEY="paste-your-key-here"
@@ -27,7 +26,7 @@ usajobs-monitor check-config --profile me              # confirm credentials and
 usajobs-monitor run --preview-delivery --profile me    # search now; alerts are written, not sent
 ```
 
-Open `usajobs_digest.html` in `me/reports` inside your [profiles folder](docs/PROFILES.md#several-profiles). Then read the near misses: each one says which single check it failed, which is the fastest way to tune your profile. To run it automatically, see [step 7](#7-run-it-on-a-schedule). The numbered sections below cover each step in detail.
+Open `usajobs_digest.html` in `me/reports` inside your [profiles folder](https://github.com/amv2/usajobs-monitor/blob/main/docs/PROFILES.md#several-profiles). Then read the near misses: each one says which single check it failed, which is the fastest way to tune your profile. To run it automatically, see [step 7](#7-run-it-on-a-schedule). The numbered sections below cover each step in detail.
 
 ## What it does
 
@@ -45,10 +44,10 @@ Open `usajobs_digest.html` in `me/reports` inside your [profiles folder](docs/PR
 - **Remembers between runs.** Each job is flagged **NEW** the first time it appears and **CLOSING SOON** when three days or less remain, and jobs that disappeared are noted. You can record a decision (applied, not interested, watching) so a job stops nagging you.
 - **Runs safely on a schedule.** Each run works in its own folder and publishes reports only after they pass validation. A lock stops two runs from overlapping, and a failed run never overwrites the last good report or puts raw errors in anything that gets sent to you.
 - **Delivers results where you'll see them.** Email through any SMTP server with the reports attached, or a short digest to Discord, Slack or ntfy. A retry never sends the same run twice.
-- **Optional AI help, off by default.** Each run can add short notes comparing your resume with each match (a fit level, gaps, resume wording to fix) and list stronger fits first without hiding any job, using a subscription you already have through the Claude Code, Codex or Gemini command-line tools, a local model with Ollama, or an API key. [docs/AI.md](docs/AI.md) compares the options. With the `mcp` extra, an AI assistant such as Claude Desktop can search and screen postings through your profile. Nothing in the core needs either one, and your resume is sent only when you turn that on.
+- **Optional AI help, off by default.** Each run can add short notes comparing your resume with each match (a fit level, gaps, resume wording to fix) and list stronger fits first without hiding any job, using a subscription you already have through the Claude Code, Codex or Gemini command-line tools, a local model with Ollama, or an API key. [docs/AI.md](https://github.com/amv2/usajobs-monitor/blob/main/docs/AI.md) compares the options. With the `mcp` extra, an AI assistant such as Claude Desktop can search and screen postings through your profile. Nothing in the core needs either one, and your resume is sent only when you turn that on.
 - **Sets itself up.** `usajobs-monitor init` asks a few questions and writes your profile, with starting eligibility for your applicant type: current federal employee, excepted service, veteran, military spouse, student, recent graduate, former federal employee, Schedule A, or the general public.
 
-Output is your choice of an HTML digest (`usajobs_digest.html`), a CSV of every job reviewed (`usajobs_jobs.csv`), a Word briefing (`usajobs_briefing.docx`) and an Excel tracker (`usajobs_tracker.xlsx`), plus a `usajobs_last_run.json` summary. Profiles written by `init` use HTML and CSV; older profiles keep Word and Excel until you set [`report.formats`](docs/CONFIG_REFERENCE.md#report-and-scoring).
+Output is your choice of an HTML digest (`usajobs_digest.html`), a CSV of every job reviewed (`usajobs_jobs.csv`), a Word briefing (`usajobs_briefing.docx`) and an Excel tracker (`usajobs_tracker.xlsx`), plus a `usajobs_last_run.json` summary. Profiles written by `init` use HTML and CSV; older profiles keep Word and Excel until you set [`report.formats`](https://github.com/amv2/usajobs-monitor/blob/main/docs/CONFIG_REFERENCE.md#report-and-scoring).
 
 ## Requirements
 
@@ -68,6 +67,24 @@ Don't paste the key into the config file or any file you might commit. Step 3 sh
 
 ## 2. Install
 
+The package is on [PyPI](https://pypi.org/project/usajobs-monitor/). [pipx](https://pipx.pypa.io/) installs it as a command in its own environment:
+
+```bash
+pipx install usajobs-monitor
+```
+
+Add optional extras in brackets, for example `pipx install "usajobs-monitor[keyring]"` for the system keychain (step 3), `[ai]` for resume fit notes or `[mcp]` for the MCP server (step 8). To add an extra later, run `pipx install --force` with the new list. `pipx upgrade usajobs-monitor` updates it.
+
+With [uv](https://docs.astral.sh/uv/): `uv tool install usajobs-monitor`. With plain pip, use a virtual environment:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate            # Windows: .venv\Scripts\activate
+pip install usajobs-monitor
+```
+
+**From source**, to follow `main` or to contribute:
+
 ```bash
 git clone https://github.com/amv2/usajobs-monitor.git
 cd usajobs-monitor
@@ -75,8 +92,6 @@ python3 -m venv .venv
 source .venv/bin/activate            # Windows: .venv\Scripts\activate
 pip install -e .
 ```
-
-If you use [uv](https://docs.astral.sh/uv/): `uv venv && uv pip install -e .`
 
 Prefer containers? Skip the Python setup and see [Docker](#docker) under step 7.
 
@@ -111,7 +126,7 @@ Open a new terminal afterwards so the variables are picked up.
 Instead of environment variables, you can store credentials in your operating system's encrypted vault: Keychain on macOS, Credential Manager on Windows, or Secret Service (GNOME Keyring, KWallet) on Linux. Install the optional extra, then save each value. You're prompted for it and nothing is shown as you type:
 
 ```bash
-pip install -e ".[keyring]"
+pip install -e ".[keyring]"     # or: pipx install --force "usajobs-monitor[keyring]"
 usajobs-monitor credentials set USAJOBS_EMAIL
 usajobs-monitor credentials set USAJOBS_API_KEY
 usajobs-monitor credentials status          # where each one comes from; never prints values
@@ -136,16 +151,16 @@ Your profile is one config file. The quickest way to make one is the setup wizar
 usajobs-monitor init
 ```
 
-It asks six things: your API key (and offers to save it in your keychain if the `keyring` extra is installed), who you're applying as, where you want to work, your target GS grade, the kind of work (keywords plus a job series picker that understands words like "budget" or "finance"), and how you want results. It saves the profile in your profiles folder (see [Several profiles](docs/PROFILES.md#several-profiles)) and tells you the next two commands to run. Use `init --config path/to/file.toml` to write the file somewhere else. The wizard never writes a credential into the profile.
+It asks six things: your API key (and offers to save it in your keychain if the `keyring` extra is installed), who you're applying as, where you want to work, your target GS grade, the kind of work (keywords plus a job series picker that understands words like "budget" or "finance"), and how you want results. It saves the profile in your profiles folder (see [Several profiles](https://github.com/amv2/usajobs-monitor/blob/main/docs/PROFILES.md#several-profiles)) and tells you the next two commands to run. Use `init --config path/to/file.toml` to write the file somewhere else. The wizard never writes a credential into the profile.
 
-To start from a file instead, use one of the two in the repo:
+To start from a file instead, download one of the two in the repo:
 
-- `profiles/financial-management-dc.toml` is a ready-made profile for financial management roles in the Washington, DC area.
-- `examples/usajobs-monitor.example.toml` is the commented template with every section.
+- [`profiles/financial-management-dc.toml`](https://github.com/amv2/usajobs-monitor/blob/main/profiles/financial-management-dc.toml) is a ready-made profile for financial management roles in the Washington, DC area.
+- [`examples/usajobs-monitor.example.toml`](https://github.com/amv2/usajobs-monitor/blob/main/examples/usajobs-monitor.example.toml) is the commented template with every section.
 
 ```bash
 mkdir -p ~/usajobs
-cp profiles/financial-management-dc.toml ~/usajobs/usajobs-monitor.toml
+curl -o ~/usajobs/usajobs-monitor.toml https://raw.githubusercontent.com/amv2/usajobs-monitor/main/profiles/financial-management-dc.toml
 ```
 
 Edit your copy, then validate it:
@@ -156,13 +171,13 @@ usajobs-monitor check-config --config ~/usajobs/usajobs-monitor.toml
 
 `check-config` names the exact setting that's wrong (for example `filters.watch_list.grades[0]: expected an integer`) instead of failing halfway through a run, and warns about keys it doesn't recognize. Optional settings you leave out get defaults. Without `--config`, the tool looks for `./usajobs-monitor.toml`.
 
-Profile details live in [docs/PROFILES.md](docs/PROFILES.md):
+Profile details live in [docs/PROFILES.md](https://github.com/amv2/usajobs-monitor/blob/main/docs/PROFILES.md):
 
-- [Config sections and the settings people change first](docs/PROFILES.md#config-sections)
-- [Pay floors from a GS grade](docs/PROFILES.md#pay-floors-from-a-gs-grade)
-- [Applicant types](docs/PROFILES.md#applicant-types)
-- [Several profiles](docs/PROFILES.md#several-profiles)
-- [Every key and its default](docs/CONFIG_REFERENCE.md)
+- [Config sections and the settings people change first](https://github.com/amv2/usajobs-monitor/blob/main/docs/PROFILES.md#config-sections)
+- [Pay floors from a GS grade](https://github.com/amv2/usajobs-monitor/blob/main/docs/PROFILES.md#pay-floors-from-a-gs-grade)
+- [Applicant types](https://github.com/amv2/usajobs-monitor/blob/main/docs/PROFILES.md#applicant-types)
+- [Several profiles](https://github.com/amv2/usajobs-monitor/blob/main/docs/PROFILES.md#several-profiles)
+- [Every key and its default](https://github.com/amv2/usajobs-monitor/blob/main/docs/CONFIG_REFERENCE.md)
 
 ## 5. Run it
 
@@ -210,7 +225,7 @@ to_addresses  = ["you@example.com"]
 server = "https://ntfy.sh"
 ```
 
-Email carries a short digest with each report in `report.formats` attached. The digest has the counts and one compact entry per listed job: its AI fit level when fit notes are on, agency, grade, closing date, the first sentence of the AI note (plus the main gap for Stretch and Unlikely fits), why a near miss was excluded, and a link, so it reads well on a phone; the full notes stay in the reports. Discord, Slack and ntfy get the same digest, cut to fit the service's length limit. Near misses are listed only when new, unless you set `delivery.near_misses = "all"`. Every key is in the [config reference](docs/CONFIG_REFERENCE.md#delivery).
+Email carries a short digest with each report in `report.formats` attached. The digest has the counts and one compact entry per listed job: its AI fit level when fit notes are on, agency, grade, closing date, the first sentence of the AI note (plus the main gap for Stretch and Unlikely fits), why a near miss was excluded, and a link, so it reads well on a phone; the full notes stay in the reports. Discord, Slack and ntfy get the same digest, cut to fit the service's length limit. Near misses are listed only when new, unless you set `delivery.near_misses = "all"`. Every key is in the [config reference](https://github.com/amv2/usajobs-monitor/blob/main/docs/CONFIG_REFERENCE.md#delivery).
 
 **Secrets go in environment variables or your keychain**, like your API key ([step 3](#or-keep-them-in-your-system-keychain)). A password or webhook URL in the config file is an error, so a config you share or commit can't leak one.
 
@@ -352,7 +367,7 @@ If you'd rather keep cron on the host, skip the scheduler and run one-off contai
 
 ### GitHub Actions
 
-No computer to leave on? GitHub can run the monitor on its own servers. The repository includes a workflow, [`.github/workflows/usajobs-monitor.yml`](.github/workflows/usajobs-monitor.yml), that searches and delivers on a schedule, and you can also start it by hand. A run takes a few minutes, well inside the free Actions minutes a private repository gets each month.
+No computer to leave on? GitHub can run the monitor on its own servers. The repository includes a workflow, [`.github/workflows/usajobs-monitor.yml`](https://github.com/amv2/usajobs-monitor/blob/main/.github/workflows/usajobs-monitor.yml), that searches and delivers on a schedule, and you can also start it by hand. A run takes a few minutes, well inside the free Actions minutes a private repository gets each month.
 
 **Use a private copy.** Your profile describes your eligibility and possibly your current agency, and your decisions file and reports describe your job search. Anything in a public repository is public. The workflow won't run in a public repository at all, so forking this repo (forks of a public repo stay public) isn't enough.
 
@@ -394,7 +409,7 @@ After that it runs on its own. Good to know:
 
 ## 8. Optional: AI fit notes and an MCP server
 
-Everything above works without AI. **[docs/AI.md](docs/AI.md) walks through every way to add it**, with what each needs:
+Everything above works without AI. **[docs/AI.md](https://github.com/amv2/usajobs-monitor/blob/main/docs/AI.md) walks through every way to add it**, with what each needs:
 
 | Way | What you need | Profile setting |
 |---|---|---|
@@ -413,10 +428,10 @@ The rest of this section covers the details for all of them.
 For each match (and watch-list job, by default), a model reads the posting's qualifications, duties and specialized experience statement next to your resume and writes a short note: each required qualification marked met, unclear or not shown on resume with the resume evidence, a fit level (strong, possible, stretch or unlikely) that never runs ahead of that checklist (one requirement not shown caps it at stretch, two or more at unlikely, an unclear one at possible), gaps, wording to change so an HR specialist gives you credit, and anything to confirm before applying. Notes land in `usajobs_fit_notes.md`, and the fit level also shows on each job in the reports and alerts, with an "AI gaps" line naming what the resume doesn't show. When the checklist lowered the AI's own level, the reports say so, for example "Stretch (AI said Possible)". "Not shown on resume" often means a wording gap rather than missing experience, so check those against what you've actually done.
 
 ```bash
-pip install -e ".[ai]"                       # PDF resume reading, plus the Claude API client
+pip install -e ".[ai]"     # or: pipx install --force "usajobs-monitor[ai]"; PDF resume reading, plus the Claude API client
 ```
 
-Then add to your profile, with the `provider` for the way you picked in [docs/AI.md](docs/AI.md):
+Then add to your profile, with the `provider` for the way you picked in [docs/AI.md](https://github.com/amv2/usajobs-monitor/blob/main/docs/AI.md):
 
 ```toml
 [ai]
@@ -443,7 +458,7 @@ usajobs-monitor fit 812345600 --preview   # prints the prompt and your resume te
 usajobs-monitor fit 812345600             # sends it and prints the note
 ```
 
-**Privacy.** Your resume is read on your computer. It goes to the provider only when `ai.send_resume = true`, and only with postings from your own search. Each way's terms are in [docs/AI.md](docs/AI.md): with a subscription (Claude, ChatGPT, Google) it's that subscription's terms, with `anthropic` your API account's [commercial terms](https://www.anthropic.com/legal/commercial-terms), and with Ollama nothing leaves your computer. The posting and resume are passed to the model as data with instructions to ignore any instructions inside them, and the CLI providers run with their tools off (Claude) or read-only (Codex, Gemini). Fit notes are written by a model, so read the announcement before you rely on them.
+**Privacy.** Your resume is read on your computer. It goes to the provider only when `ai.send_resume = true`, and only with postings from your own search. Each way's terms are in [docs/AI.md](https://github.com/amv2/usajobs-monitor/blob/main/docs/AI.md): with a subscription (Claude, ChatGPT, Google) it's that subscription's terms, with `anthropic` your API account's [commercial terms](https://www.anthropic.com/legal/commercial-terms), and with Ollama nothing leaves your computer. The posting and resume are passed to the model as data with instructions to ignore any instructions inside them, and the CLI providers run with their tools off (Claude) or read-only (Codex, Gemini). Fit notes are written by a model, so read the announcement before you rely on them.
 
 **A profile can't run code by itself.** The CLI, Ollama and `command` providers run a program on your computer, so a profile that names one is refused until you also allow it outside the file with `USAJOBS_ALLOW_AI_PROVIDER`: the provider's name (`claude-cli`), or for `command` the exact command line (`'llm -m gpt-5'`; comma-separate several). `check-config` prints the value to set. The whole command line must match, so allowing `python3 my_model.py` doesn't let another profile run `python3 -c ...`. This way a profile someone shares with you can't start a program or import code just because you ran it. Read any shared profile's `[ai]` table before you allow it.
 
@@ -458,7 +473,7 @@ usajobs-monitor fit 812345600             # sends it and prints the note
 | `explain_match` | For one control number: its list, every failed check with its code, the relevance score by signal, and your decision if you recorded one. |
 
 ```bash
-pip install -e ".[mcp]"
+pip install -e ".[mcp]"     # or: pipx install --force "usajobs-monitor[mcp]"
 ```
 
 Then add it to your MCP client. For Claude Desktop, in `claude_desktop_config.json`:
@@ -548,7 +563,7 @@ Good habits:
 | 4 | `init` wizard, applicant-type presets, multiple profiles, `decide` command, HTML/CSV outputs | Done |
 | 5 | Optional AI add-on: résumé fit notes and an MCP server. The core never requires AI. | Done |
 | 6 | Docker image and compose example with a built-in scheduler | Done |
-| 7 | AI fit ranking (strong, possible, stretch, unlikely) with an "AI gaps" line, several resume versions with the best one named per job, resume-first prompt caching, and ready-made providers for the Claude Code, Codex and Gemini CLIs and Ollama ([docs/AI.md](docs/AI.md)) | Done (v0.2.0) |
+| 7 | AI fit ranking (strong, possible, stretch, unlikely) with an "AI gaps" line, several resume versions with the best one named per job, resume-first prompt caching, and ready-made providers for the Claude Code, Codex and Gemini CLIs and Ollama ([docs/AI.md](https://github.com/amv2/usajobs-monitor/blob/main/docs/AI.md)) | Done (v0.2.0) |
 
 Phases 1 to 6 shipped in v0.1.0. Ideas under consideration, not promises:
 
@@ -567,12 +582,14 @@ pip install -e ".[ai,mcp,keyring]"   # the extras are optional; tests that need 
 python -m unittest discover -s tests
 ```
 
-Without installing, `PYTHONPATH=src python -m unittest discover -s tests` works too. The [tests workflow](.github/workflows/tests.yml) runs the same suite on Python 3.11 to 3.14, on Linux and Windows, for every pull request.
+Without installing, `PYTHONPATH=src python -m unittest discover -s tests` works too. The [tests workflow](https://github.com/amv2/usajobs-monitor/blob/main/.github/workflows/tests.yml) runs the same suite on Python 3.11 to 3.14, on Linux and Windows, for every pull request.
+
+Releases are cut as described in [docs/RELEASING.md](https://github.com/amv2/usajobs-monitor/blob/main/docs/RELEASING.md).
 
 Please don't attach real configs, decisions files or reports to issues. Use the sample profile, or redact your copy first.
 
 ## License
 
-MIT, copyright 2026 amv2. See [LICENSE](LICENSE).
+MIT, copyright 2026 amv2. See [LICENSE](https://github.com/amv2/usajobs-monitor/blob/main/LICENSE).
 
 This project isn't affiliated with or endorsed by USAJOBS or the U.S. Office of Personnel Management. It uses the public [USAJOBS API](https://developer.usajobs.gov/) under its terms of use.

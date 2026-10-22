@@ -1,23 +1,43 @@
 [build-system]
-requires = ["setuptools>=69"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "usajobs-monitor"
-version = "0.2.0"
+# The version lives in src/usajobs_monitor/__init__.py.
+dynamic = ["version"]
 description = "Scheduled USAJOBS search with eligibility screening, near misses and run-to-run tracking."
 readme = "README.md"
 license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "amv2" }]
+keywords = ["usajobs", "federal jobs", "job search", "job alerts", "opm", "general schedule"]
 requires-python = ">=3.11"
 dependencies = [
     "python-docx>=1.2.0",
     "openpyxl>=3.1.5",
 ]
+# No license classifier: the license expression above replaces it (PEP 639),
+# and setuptools refuses to build with both.
 classifiers = [
-    "Programming Language :: Python :: 3",
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: End Users/Desktop",
     "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Office/Business",
 ]
+
+[project.urls]
+Homepage = "https://github.com/amv2/usajobs-monitor"
+Documentation = "https://github.com/amv2/usajobs-monitor#readme"
+Issues = "https://github.com/amv2/usajobs-monitor/issues"
+Changelog = "https://github.com/amv2/usajobs-monitor/releases"
 
 [project.optional-dependencies]
 keyring = ["keyring>=25"]
@@ -28,6 +48,9 @@ mcp = ["mcp>=1.10"]
 
 [project.scripts]
 usajobs-monitor = "usajobs_monitor.cli:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "usajobs_monitor.__version__" }
 
 [tool.setuptools.packages.find]
 where = ["src"]
