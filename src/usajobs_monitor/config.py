@@ -555,7 +555,7 @@ def _check_ai(check: _Checker, config: dict[str, Any]) -> None:
     model = ai.get("model")
     if provider == "openai" and isinstance(model, str) and not re.fullmatch(AI_MODEL_NAME, model):
         check.error("ai.model", 'required with provider = "openai": the model name the server knows, for example '
-                    '"gpt-5", "gemini-2.5-flash" or "qwen3-8b"' if not model else
+                    '"gpt-5", "gemini-flash-latest" or "qwen3-8b"' if not model else
                     "expected a model name such as gpt-5 or llama3.1")
     if provider in AI_PRESETS and isinstance(model, str):
         if not model and not AI_PRESETS[provider]["model_flag"]:

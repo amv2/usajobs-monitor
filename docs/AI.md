@@ -230,7 +230,7 @@ model    = "gpt-5"                       # required: a model name the service kn
 | Service | `base_url` | Key variable (default) | Example `model` |
 |---|---|---|---|
 | OpenAI | `https://api.openai.com/v1` (default) | `OPENAI_API_KEY` | `gpt-5` |
-| Google Gemini | `https://generativelanguage.googleapis.com/v1beta/openai` | `GEMINI_API_KEY` | `gemini-2.5-flash` |
+| Google Gemini | `https://generativelanguage.googleapis.com/v1beta/openai` | `GEMINI_API_KEY` | `gemini-flash-latest` (always the current Flash model) |
 | OpenRouter (many models, one key) | `https://openrouter.ai/api/v1` | `OPENROUTER_API_KEY` | `openai/gpt-5` |
 | Groq | `https://api.groq.com/openai/v1` | `GROQ_API_KEY` | see the service's model list |
 | Mistral | `https://api.mistral.ai/v1` | `MISTRAL_API_KEY` | `mistral-large-latest` |

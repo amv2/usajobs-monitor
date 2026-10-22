@@ -666,7 +666,7 @@ class OpenAIProviderTests(unittest.TestCase):
                          ("https://api.openai.com/v1", "OPENAI_API_KEY", "json_schema", ""))
         self.assertEqual(warnings, [])
         ai, warnings = self.ai(base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
-                               model="gemini-2.5-flash")
+                               model="gemini-flash-latest")
         self.assertEqual((ai["base_url"], ai["api_key_env"]),
                          ("https://generativelanguage.googleapis.com/v1beta/openai", "GEMINI_API_KEY"))
         self.assertEqual(warnings, [])
@@ -774,6 +774,13 @@ class OpenAIProviderTests(unittest.TestCase):
         with self.assertRaises(FitError) as caught:
             provider.complete("s", "p")
         self.assertIn("rate limiting", str(caught.exception))
+        self.assertFalse(caught.exception.fatal)
+        server = self.serve((503, {}), (503, {}), (503, {}))
+        provider = fit.make_provider({**ai, "base_url": server.url}, env={})
+        provider.sleep = lambda seconds: None
+        with self.assertRaises(FitError) as caught:
+            provider.complete("s", "p")
+        self.assertIn("busy or having trouble (HTTP 503)", str(caught.exception))
         self.assertFalse(caught.exception.fatal)
 
     def test_unusual_answers(self):

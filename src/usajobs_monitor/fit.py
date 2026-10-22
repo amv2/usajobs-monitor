@@ -230,7 +230,7 @@ class OpenAIProvider:
 
     MAX_RESPONSE_BYTES = 4_000_000
     RETRY_STATUSES = {429, 500, 502, 503, 504}
-    RETRY_WAITS = (2.0, 8.0)
+    RETRY_WAITS = (4.0, 15.0)
 
     def __init__(self, base_url: str, api_key: str, model: str, effort: str, response_format: str,
                  timeout: float) -> None:
@@ -306,6 +306,8 @@ class OpenAIProvider:
         if 300 <= status < 400:
             return FitError(f"{self.host} answered with a redirect, which is not followed; check ai.base_url",
                             fatal=True)
+        if status >= 500:
+            return FitError(f"{self.host} is busy or having trouble (HTTP {status}); the next run tries again")
         return FitError(f"{self.host} returned HTTP {status}")
 
     def _answer_text(self, raw: bytes) -> str:
