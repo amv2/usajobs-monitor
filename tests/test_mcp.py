@@ -69,10 +69,19 @@ class ToolTests(unittest.TestCase):
             out = tools.search_jobs(self.settings)
         self.assertEqual((out["results"], out["counts"]), ([], {"hidden": 1}))
 
+    def test_posting_lookup_keeps_only_that_control_number(self):
+        # A keyword search for the number can bring back other postings too.
+        with self.fetch(job("7"), job("812345600"), job("8")):
+            out = tools.screen_eligibility(self.settings, "812345600")
+        self.assertEqual(out["eligibility_basis"], "Open to the public")
+        with self.fetch(job("7"), job("8")), self.assertRaises(tools.ToolInputError) as caught:
+            tools.screen_eligibility(self.settings, "812345600")
+        self.assertIn("No open USAJOBS posting has control number 812345600", str(caught.exception))
+
     def test_screen_eligibility(self):
         with self.fetch(job("5")) as fetch:
             out = tools.screen_eligibility(self.settings, "5")
-        self.assertEqual(fetch.call_args.args[0], {"ControlNumber": "5"})
+        self.assertEqual(fetch.call_args.args[0], {"Keyword": "5"})
         self.assertEqual((out["verdict"], out["eligibility_basis"]), ("route_found", "Open to the public"))
         with self.fetch(job("6", paths=("fed-competitive",))):
             out = tools.screen_eligibility(self.settings, "6")

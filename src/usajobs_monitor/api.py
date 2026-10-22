@@ -172,7 +172,9 @@ def fetch_job(control_number: str, credentials: dict[str, str]) -> dict[str, Any
     number = str(control_number).strip()
     if not number.isdigit():
         raise ValueError("a control number is the number in the job's USAJOBS link, e.g. 812345600")
-    payload = fetch_usajobs({"ControlNumber": number}, credentials["email"], credentials["api_key"])
+    # The search API has no control-number filter (it ignores ControlNumber and returns
+    # unrelated postings), but a keyword search for the number finds the posting.
+    payload = fetch_usajobs({"Keyword": number}, credentials["email"], credentials["api_key"])
     jobs = [descriptor(item) for item in api_items(payload)]
     from .jobs import job_id
     return next((job for job in jobs if job_id(job) == number), None)
