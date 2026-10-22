@@ -24,6 +24,7 @@ from uuid import uuid4
 
 from . import api
 from .config import Settings
+from .jobs import job_id
 from .locking import exclusive_lock
 from .reports import (
     CSV_NAME,
@@ -42,8 +43,8 @@ from .reports import (
     write_word,
 )
 from .review import review_job, target_agency_hit
-from .tracking import (HISTORY_NAME, UNREADABLE_SUFFIX, baseline_text, build_view, load_decisions, read_history,
-                       watch_list_label)
+from .tracking import (HISTORY_NAME, UNREADABLE_SUFFIX, RunView, baseline_text, build_view, load_decisions,
+                       read_history, watch_list_label)
 
 SUMMARY = SUMMARY_NAME
 HISTORY = HISTORY_NAME
@@ -158,6 +159,8 @@ def run_search(settings: Settings, output_dir: Path, *, today: date | None = Non
             "near_misses": view.new_count(view.near),
         },
         "closing_soon": view.closing_soon_count(),
+        "closing_soon_days": view.closing_soon_days,
+        "closing_soon_jobs": closing_soon_entries(view),
         "dropped_since_last_run": view.dropped,
         "hidden_not_interested": len(view.hidden),
         "matches": [summary_entry(r, view) for r in view.matches],
@@ -169,6 +172,13 @@ def run_search(settings: Settings, output_dir: Path, *, today: date | None = Non
     _add_report_paths(summary, output_dir)
     (output_dir / SUMMARY).write_text(json.dumps(summary, indent=2, sort_keys=True), encoding="utf-8")
     return summary
+
+
+def closing_soon_entries(view: RunView) -> list[dict]:
+    """Every listed posting that closes within the window, soonest first. Delivery
+    leads with these, so a deadline is not hidden by the per-section limit."""
+    return [{**summary_entry(r, view), "list": name, "days_left": view.closing_days[job_id(r.job)]}
+            for r, name in view.closing_soon()]
 
 
 def _add_report_paths(summary: dict, folder: Path) -> None:

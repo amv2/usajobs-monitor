@@ -10,6 +10,7 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
+from .config import CLOSING_SOON_DAYS
 from .jobs import GS_SCALE_PAY_PLANS, close_date, grade_numbers, job_id, job_pay_plans, job_url, salary_upper
 from .reasons import Code, code_of, is_hard_no
 from .review import VERIFY_ELIGIBILITY_FLAG, ReviewResult, needs_eligibility_check
@@ -21,7 +22,6 @@ HIDDEN_STATUSES = {"not_interested", "rejected", "withdrawn"}
 # Applications still in progress: flagged on every run and listed by ``decide`` with days waiting.
 ACTIVE_STATUSES = {"applied", "interview", "offer"}
 STALE_DAYS = 30
-CLOSING_SOON_DAYS = 3
 HISTORY_KEEP_DAYS = 45
 NEAR_MISS_LIMIT = 15
 FIT_LABELS = {"strong": "Strong", "possible": "Possible", "stretch": "Stretch", "unlikely": "Unlikely"}
@@ -250,6 +250,9 @@ class RunView:
     fit_main_gaps: dict[str, str] = field(default_factory=dict)
     # The AI's own level when its requirement checklist lowered it.
     fit_lowered: dict[str, str] = field(default_factory=dict)
+    # Days until each CLOSING SOON posting closes (0 = closes today).
+    closing_days: dict[str, int] = field(default_factory=dict)
+    closing_soon_days: int = CLOSING_SOON_DAYS
 
     def fit_text(self, result: ReviewResult) -> str:
         number = job_id(result.job)
@@ -292,8 +295,20 @@ class RunView:
     def new_count(self, items: list[ReviewResult]) -> int:
         return sum("NEW" in self.flags.get(job_id(r.job), []) for r in items)
 
+    def closing_soon(self) -> list[tuple[ReviewResult, str]]:
+        """Listed postings flagged CLOSING SOON with the list each is on, soonest first."""
+        seen: set[str] = set()
+        found = []
+        for name, items in (("match", self.matches), ("watch", self.watch), ("near_miss", self.near)):
+            for r in items:
+                number = job_id(r.job)
+                if number in self.closing_days and number not in seen:
+                    seen.add(number)
+                    found.append((r, name))
+        return sorted(found, key=lambda pair: self.closing_days[job_id(pair[0].job)])
+
     def closing_soon_count(self) -> int:
-        return sum("CLOSING SOON" in self.flags.get(job_id(r.job), []) for r in self.matches + self.watch + self.near)
+        return len(self.closing_soon())
 
 
 def build_view(results: list[ReviewResult], config: dict[str, Any], history: dict[str, Any] | None,
@@ -317,7 +332,9 @@ def build_view(results: list[ReviewResult], config: dict[str, Any], history: dic
 
     previous = (history or {}).get("jobs", {})
     baseline = history is None
+    window = (config.get("report") or {}).get("closing_soon_days") or CLOSING_SOON_DAYS
     flags: dict[str, list[str]] = {}
+    closing_days: dict[str, int] = {}
     for r in results:
         number = job_id(r.job)
         tags = []
@@ -326,9 +343,12 @@ def build_view(results: list[ReviewResult], config: dict[str, Any], history: dic
         if needs_eligibility_check(r):
             tags.append(VERIFY_ELIGIBILITY_FLAG)
         closes = close_date(r.job)
-        if closes is not None and 0 <= (closes - today).days <= CLOSING_SOON_DAYS:
-            tags.append("CLOSING SOON")
         decision = decisions.get(number)
+        # A posting with an application in progress needs no deadline reminder.
+        if (closes is not None and 0 <= (closes - today).days <= window
+                and not (decision and decision["status"] in ACTIVE_STATUSES)):
+            tags.append("CLOSING SOON")
+            closing_days[number] = (closes - today).days
         if decision and decision["status"] not in HIDDEN_STATUSES:
             tags.append(decision["status"].upper())
         flags[number] = tags
@@ -371,7 +391,17 @@ def build_view(results: list[ReviewResult], config: dict[str, Any], history: dic
             "url": job_url(r.job),
         }
     new_history = {"version": 1, "run_marker": run_marker, "updated": today.isoformat(), "jobs": jobs}
-    return RunView(matches, watch, near, hidden, dropped, flags, decisions, baseline, new_history)
+    return RunView(matches, watch, near, hidden, dropped, flags, decisions, baseline, new_history,
+                   closing_days=closing_days, closing_soon_days=window)
+
+
+def closes_in_text(days: int, closes: date) -> str:
+    """How soon a CLOSING SOON posting closes: today, tomorrow, or the weekday and date."""
+    if days <= 0:
+        return "closes today"
+    if days == 1:
+        return "closes tomorrow"
+    return f"closes {closes:%a %b} {closes.day}"
 
 
 def _days_since(value: str, today: date) -> int | None:

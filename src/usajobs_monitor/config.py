@@ -47,6 +47,7 @@ DEFAULT_SCORING = {
     "pay_tier_mid": 155000,
 }
 DEFAULT_REPORT_TITLE = "USAJOBS Job Monitor"
+CLOSING_SOON_DAYS = 3  # report.closing_soon_days: flag postings closing within this many days
 REPORT_FORMATS = ("docx", "xlsx", "html", "csv")
 DEFAULT_REPORT_FORMATS = ("docx", "xlsx")
 
@@ -321,8 +322,12 @@ def validate_config(raw: Mapping[str, Any]) -> tuple[dict[str, Any], list[str]]:
                                   "hiring path code (" + ", ".join(HIRING_PATHS) + "), so it never matches")
 
     report = check.section(config, "report")
-    check.unknown(report, "report", {"title", "formats"})
+    check.unknown(report, "report", {"title", "formats", "closing_soon_days"})
     check.string(report, "title", "report", DEFAULT_REPORT_TITLE)
+    check.number(report, "closing_soon_days", "report", CLOSING_SOON_DAYS, integer=True)
+    days = report.get("closing_soon_days")
+    if isinstance(days, int) and not isinstance(days, bool) and not 1 <= days <= 14:
+        check.error("report.closing_soon_days", "expected 1 to 14")
     check.strings(report, "formats", "report", list(DEFAULT_REPORT_FORMATS))
     formats = report.get("formats")
     if isinstance(formats, list) and all(isinstance(f, str) for f in formats):
