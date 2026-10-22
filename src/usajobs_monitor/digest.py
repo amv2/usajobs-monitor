@@ -21,7 +21,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 from .config import CLOSING_SOON_DAYS
 from .reports import CSV_NAME, EXCEL_NAME, HTML_NAME, HTML_STYLE, REPORT_LABELS, WORD_NAME
-from .tracking import baseline_text, closes_in_text
+from .tracking import baseline_text, closes_in_text, incomplete_text
 
 # File name -> (MIME type, the ZIP member an Office file must contain, or "").
 ATTACHMENT_TYPES = {
@@ -215,12 +215,18 @@ def build_digest(manifest: dict, summary: dict, finished: datetime, *, max_items
         closing = _entries(summary, "closing_soon_jobs")
         if closing:
             subject += f" · {len(closing)} closing soon"
+        failed = summary.get("failed_searches")
+        failed = [text(f) for f in failed] if summary.get("incomplete") is True and isinstance(failed, list) else []
+        if failed:
+            subject += " · incomplete"
         paragraphs = [
             f"Reviewed {summary['jobs_reviewed']} jobs across {summary['usajobs_searches']} searches.",
             f"Matches: {matches}. Target-agency matches: {summary['target_agency_matches']}. "
             + (f"{watch_label}: {watch_count}. " if watch_count or watch_label != "Watch list" else "")
             + f"Near misses reported: {summary['near_misses_reported']}.",
         ]
+        if failed:
+            paragraphs.append(incomplete_text(failed))
         if summary.get("history_baseline") is True:
             paragraphs.append(f"New since last run: this is a baseline run; "
                               f"{baseline_text(str(summary.get('history_status') or 'missing'))}.")

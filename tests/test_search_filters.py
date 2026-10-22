@@ -49,6 +49,27 @@ class PagingTests(unittest.TestCase):
             jobs, calls, warnings = api.search_all_jobs(config)
         self.assertEqual(([j["PositionID"] for j in jobs], calls, warnings), ([1, 2, 3, 4], 4, []))
 
+    SEARCH = {"credentials": {"email": "e", "api_key": "k"},
+              "search": {"target_role_keywords": ["a", "b", "c"], "locations": ["Bethesda"]}}
+
+    def test_failed_search_is_skipped_and_named_when_failures_collected(self):
+        effects = [page([1], 1), RuntimeError("USAJOBS API returned HTTP 500: secret body"), page([3], 1)]
+        failures = []
+        with mock.patch.object(api, "fetch_usajobs", side_effect=effects):
+            jobs, calls, _ = api.search_all_jobs(self.SEARCH, failures=failures)
+        self.assertEqual(([j["PositionID"] for j in jobs], calls), ([1, 3], 2))
+        self.assertEqual(failures, ["'b' (Bethesda)"])
+
+    def test_failed_search_raises_without_failures_list(self):
+        effects = [page([1], 1), RuntimeError("down"), page([3], 1)]
+        with mock.patch.object(api, "fetch_usajobs", side_effect=effects), self.assertRaises(RuntimeError):
+            api.search_all_jobs(self.SEARCH)
+
+    def test_more_than_half_failed_fails_the_run(self):
+        effects = [RuntimeError("down"), RuntimeError("down"), page([3], 1)]
+        with mock.patch.object(api, "fetch_usajobs", side_effect=effects), self.assertRaises(api.SearchFailed):
+            api.search_all_jobs(self.SEARCH, failures=[])
+
 
 class WholeWordTermTests(unittest.TestCase):
     def test_terms_match_whole_words(self):
@@ -369,6 +390,21 @@ class HistoryAndDecisionTests(unittest.TestCase):
         self.assertEqual(second.history["jobs"]["1"]["first_seen"], "2026-10-16")
         third = self.view([result("old match", [], number=1)], history=second.history, marker="run-3")
         self.assertEqual({d["control_number"] for d in third.dropped}, {"4"})
+
+    def test_incomplete_run_reports_nothing_dropped_and_keeps_tracking(self):
+        first = self.view([result("a", [], number=1), result("b", [], number=2)], marker="run-1")
+        # Job 2 is missing only because its search failed.
+        partial = tracking.build_view([result("a", [], number=1)], WATCH_CONFIG, first.history, {}, self.today,
+                                      "run-2", ["'b' (Bethesda)"])
+        self.assertEqual(partial.dropped, [])
+        self.assertEqual(partial.failed_searches, ["'b' (Bethesda)"])
+        self.assertEqual(partial.history["jobs"]["2"]["last_seen_run"], "run-2")
+        # Back after a full run: not NEW. Gone after a full run: reported dropped.
+        back = self.view([result("a", [], number=1), result("b", [], number=2)], history=partial.history,
+                         marker="run-3")
+        self.assertEqual(back.flags["2"], [])
+        gone = self.view([result("a", [], number=1)], history=partial.history, marker="run-3")
+        self.assertEqual({d["control_number"] for d in gone.dropped}, {"2"})
 
     def test_decisions_hide_and_flag(self):
         decisions = {"1": {"status": "not_interested", "note": ""}, "2": {"status": "applied", "note": "10-15"}}

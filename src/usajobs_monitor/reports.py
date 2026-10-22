@@ -26,7 +26,7 @@ from .config import target_label
 from .presets import preset_labels
 from .reasons import code_of
 from .review import SENIOR_EXECUTIVE_PAY_PLANS, ReviewResult, applicant_label, target_agency_hit
-from .tracking import FIT_LABELS, RunView, baseline_text, near_miss_reason_text, watch_list_label
+from .tracking import FIT_LABELS, RunView, baseline_text, incomplete_text, near_miss_reason_text, watch_list_label
 
 WORD_NAME = "usajobs_briefing.docx"
 EXCEL_NAME = "usajobs_tracker.xlsx"
@@ -226,6 +226,8 @@ def write_word(path: Path, results: list[ReviewResult], config: dict[str, Any], 
                         f"{view.new_count(view.watch)} watch list, {view.new_count(view.near)} near misses")
     summary.add_run(f"\nClosing within {view.closing_soon_days} days: {view.closing_soon_count()}")
     summary.add_run(f"\nDropped since last run: {len(view.dropped)}")
+    if view.failed_searches:
+        summary.add_run(f"\n{incomplete_text(view.failed_searches)}").bold = True
     if view.hidden:
         summary.add_run(f"\nHidden by your decisions: {len(view.hidden)}")
     summary.add_run(f"\n{resume_note(resumes, len(view.fits))}")
@@ -356,6 +358,7 @@ def write_excel(path: Path, results: list[ReviewResult], config: dict[str, Any],
         ("New since last run", f"baseline run; {baseline_text(view.history_state)}" if view.baseline else
          f"{view.new_count(view.matches)} matches, {view.new_count(view.watch)} watch list, {view.new_count(view.near)} near misses"),
         ("Dropped since last run", len(view.dropped)),
+        *([("Incomplete run", incomplete_text(view.failed_searches))] if view.failed_searches else []),
         ("Hidden by your decisions", len(view.hidden)),
         ("Resumes", resume_note(resumes, len(view.fits))),
         ("Salary rule", f"Upper salary must exceed {_money(config['filters'].get('salary_upper_must_exceed'))}"),
@@ -523,6 +526,8 @@ def write_html(path: Path, results: list[ReviewResult], config: dict[str, Any], 
             f'<div style="{HTML_STYLE["card"]};margin-top:16px">'
             + "".join(f'<span style="{HTML_STYLE["stat"]}"><b>{n}</b> {esc(label)}</span>' for label, n in stats)
             + "</div>"]
+    if view.failed_searches:
+        body.append(f'<p style="{HTML_STYLE["fact"]}"><b>{esc(incomplete_text(view.failed_searches))}</b></p>')
     if view.baseline:
         body.append(f'<p style="{HTML_STYLE["muted"]}">Baseline run: {esc(baseline_text(view.history_state))}.</p>')
     else:

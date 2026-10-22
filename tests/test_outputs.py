@@ -104,6 +104,27 @@ class OutputTests(unittest.TestCase):
         self.assertIn("HTML digest and CSV export are attached",
                       message.get_body(preferencelist=("plain",)).get_content())
 
+    def test_incomplete_run_is_delivered_and_says_so(self):
+        def search(config, failures=None):
+            failures.append("'Budget Analyst' (Remote)")
+            return JOBS, 1, []
+        patch.object(api, "search_all_jobs", side_effect=search).start()
+        settings = self.settings(["docx", "xlsx", "html", "csv"])
+        code, outcome = runner.run(settings, lambda run_dir: delivery.deliver(run_dir, settings, dry_run=True))
+        self.assertEqual(code, 0, outcome)
+        folder = Path(outcome["run_directory"])
+        summary = json.loads((folder / runner.SUMMARY).read_text())
+        self.assertIs(summary["incomplete"], True)
+        self.assertEqual(summary["failed_searches"], ["'Budget Analyst' (Remote)"])
+        self.assertTrue(summary["search_warnings"][0].startswith("Incomplete run: 1 search failed"))
+        self.assertIn("Incomplete run", (folder / HTML_NAME).read_text())
+        with zipfile.ZipFile(folder / WORD_NAME) as archive:
+            self.assertIn("Incomplete run", archive.read("word/document.xml").decode())
+        eml = next(folder.rglob("email.eml"))
+        message = BytesParser(policy=policy.default).parsebytes(eml.read_bytes())
+        self.assertTrue(message["Subject"].endswith("· incomplete"))
+        self.assertIn("'Budget Analyst' (Remote)", message.get_body(preferencelist=("plain",)).get_content())
+
     def test_all_four_formats_validate_and_deliver(self):
         settings = self.settings(["docx", "xlsx", "html", "csv"])
         code, outcome = runner.run(settings, lambda run_dir: delivery.deliver(run_dir, settings, dry_run=True))
