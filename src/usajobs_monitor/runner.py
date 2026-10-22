@@ -43,7 +43,7 @@ from .reports import (
     write_word,
 )
 from .review import review_job, target_agency_hit
-from .tracking import (HISTORY_NAME, UNREADABLE_SUFFIX, RunView, build_view, load_decisions,
+from .tracking import (HISTORY_NAME, UNREADABLE_SUFFIX, RunView, build_view, incomplete_text, load_decisions,
                        read_history, watch_list_label)
 
 SUMMARY = SUMMARY_NAME
@@ -103,12 +103,13 @@ def run_search(settings: Settings, output_dir: Path, *, today: date | None = Non
     started_at = datetime.now().astimezone()
     output_dir.mkdir(parents=True, exist_ok=True)
     resumes = resume_pdfs(settings.resume_folder)
-    jobs, calls, search_warnings = api.search_all_jobs(config)
+    failed_searches: list[str] = []
+    jobs, calls, search_warnings = api.search_all_jobs(config, failures=failed_searches)
     results = [review_job(job, config) for job in jobs]
     decisions, decision_warnings = load_decisions(settings.decisions_path)
     history, history_state = read_history(settings.history_path)
     view = build_view(results, config, history, decisions, today or date.today(),
-                      started_at.isoformat(timespec="seconds"))
+                      started_at.isoformat(timespec="seconds"), failed_searches)
     view.history_state = history_state
     if history_state == "unreadable":
         decision_warnings.append(f"Job history: {settings.history_path.name} could not be read. This run is a new "
@@ -149,7 +150,10 @@ def run_search(settings: Settings, output_dir: Path, *, today: date | None = Non
         "near_misses_reported": len(view.near),
         "watch_list_count": len(view.watch),
         "watch_list_label": watch_list_label(config),
-        "search_warnings": search_warnings + decision_warnings + fit_warnings,
+        "search_warnings": ([incomplete_text(failed_searches)] if failed_searches else [])
+                           + search_warnings + decision_warnings + fit_warnings,
+        "incomplete": bool(failed_searches),
+        "failed_searches": failed_searches,
         "fit_notes": fit_notes,
         "history_baseline": view.baseline,
         "history_status": history_state,

@@ -93,14 +93,30 @@ def fetch_all_pages(
         if not page_items or len(items) >= total:
             return items, calls, ""
         if page >= max_pages:
-            label = params.get("Keyword") or "search"
-            where = params.get("LocationName") or ("remote" if params.get("RemoteIndicator") else "all locations")
-            return items, calls, f"'{label}' ({where}): fetched {len(items)} of {total} results (page cap {max_pages})"
+            return items, calls, f"{search_label(params)}: fetched {len(items)} of {total} results (page cap {max_pages})"
         page += 1
 
 
-def search_all_jobs(config: dict[str, Any]) -> tuple[list[dict[str, Any]], int, list[str]]:
-    """Run every keyword in every location (plus remote if enabled); dedupe by position."""
+def search_label(params: dict[str, Any]) -> str:
+    label = params.get("Keyword") or "search"
+    where = params.get("LocationName") or ("remote" if params.get("RemoteIndicator") else "all locations")
+    return f"'{label}' ({where})"
+
+
+class SearchFailed(RuntimeError):
+    """Too many of a run's searches failed for its results to be useful."""
+
+
+def search_all_jobs(config: dict[str, Any], *, failures: list[str] | None = None
+                    ) -> tuple[list[dict[str, Any]], int, list[str]]:
+    """Run every keyword in every location (plus remote if enabled); dedupe by position.
+
+    Without ``failures`` the first failed search raises. With it, a search that
+    still fails after its retries is skipped and its label appended, so one bad
+    search doesn't cost the whole run. If more than half of the searches fail
+    (an outage, or bad credentials), it raises ``SearchFailed`` instead, so the
+    run fails and sends its failure notice rather than an empty digest.
+    """
     credentials = config["credentials"]
     search = config["search"]
     seen: set[str] = set()
@@ -114,9 +130,20 @@ def search_all_jobs(config: dict[str, Any]) -> tuple[list[dict[str, Any]], int, 
         "RemunerationMinimumAmount": search.get("salary_query_floor") or None,
     }
 
+    attempted = 0
+
     def collect(params: dict[str, Any]) -> None:
-        nonlocal calls
-        items, used, warning = fetch_all_pages(params, credentials["email"], credentials["api_key"])
+        nonlocal calls, attempted
+        attempted += 1
+        if failures is None:
+            items, used, warning = fetch_all_pages(params, credentials["email"], credentials["api_key"])
+        else:
+            try:
+                items, used, warning = fetch_all_pages(params, credentials["email"], credentials["api_key"])
+            except (RuntimeError, ValueError):
+                # The error text can echo the API response, so only the search is named.
+                failures.append(search_label(params))
+                return
         calls += used
         if warning:
             warnings.append(warning)
@@ -135,6 +162,8 @@ def search_all_jobs(config: dict[str, Any]) -> tuple[list[dict[str, Any]], int, 
         if search.get("include_remote_jobs"):
             collect({**base_params, "Keyword": keyword, "RemoteIndicator": "true"})
 
+    if failures and len(failures) * 2 > attempted:
+        raise SearchFailed(f"{len(failures)} of {attempted} searches failed")
     return jobs, calls, warnings
 
 

@@ -226,6 +226,14 @@ def baseline_text(state: str, history_name: str = HISTORY_NAME) -> str:
     return "there is no earlier history yet, so nothing is flagged NEW"
 
 
+def incomplete_text(failed: list[str]) -> str:
+    """Why an incomplete run's lists may be short."""
+    shown = ", ".join(failed[:5]) + (f" and {len(failed) - 5} more" if len(failed) > 5 else "")
+    return (f"Incomplete run: {len(failed)} {'search' if len(failed) == 1 else 'searches'} failed after retries "
+            f"({shown}). Postings only those searches find are missing from this run, and nothing is "
+            "reported as dropped. The next run searches them again.")
+
+
 @dataclass
 class RunView:
     matches: list[ReviewResult]
@@ -253,6 +261,8 @@ class RunView:
     # Days until each CLOSING SOON posting closes (0 = closes today).
     closing_days: dict[str, int] = field(default_factory=dict)
     closing_soon_days: int = CLOSING_SOON_DAYS
+    # Searches that failed after their retries; non-empty means an incomplete run.
+    failed_searches: list[str] = field(default_factory=list)
 
     def fit_text(self, result: ReviewResult) -> str:
         number = job_id(result.job)
@@ -312,7 +322,15 @@ class RunView:
 
 
 def build_view(results: list[ReviewResult], config: dict[str, Any], history: dict[str, Any] | None,
-               decisions: dict[str, dict[str, str]], today: date, run_marker: str) -> RunView:
+               decisions: dict[str, dict[str, str]], today: date, run_marker: str,
+               failed_searches: list[str] | None = None) -> RunView:
+    """Sort a run's results into lists and compare them with the last run's history.
+
+    ``failed_searches`` marks an incomplete run: postings those searches would have
+    found are missing, so nothing is reported dropped, and the last run's postings
+    carry its marker forward so the next full run can still report them dropped.
+    """
+    partial = bool(failed_searches)
     hidden_ids = {number for number, d in decisions.items() if d["status"] in HIDDEN_STATUSES}
     hidden = [r for r in results if job_id(r.job) in hidden_ids]
     visible = [r for r in results if job_id(r.job) not in hidden_ids]
@@ -357,7 +375,7 @@ def build_view(results: list[ReviewResult], config: dict[str, Any], history: dic
     previous_marker = (history or {}).get("run_marker")
     dropped = []
     for number, entry in previous.items():
-        if (number not in current_ids and entry.get("list") in ("match", "watch", "near_miss")
+        if (not partial and number not in current_ids and entry.get("list") in ("match", "watch", "near_miss")
                 and entry.get("last_seen_run") == previous_marker and number not in hidden_ids):
             closes = None
             try:
@@ -377,6 +395,8 @@ def build_view(results: list[ReviewResult], config: dict[str, Any], history: dic
         except ValueError:
             continue
         if (today - last_seen).days <= HISTORY_KEEP_DAYS:
+            if partial and entry.get("last_seen_run") == previous_marker:
+                entry = {**entry, "last_seen_run": run_marker}
             jobs[number] = entry
     for r in results:
         number = job_id(r.job)
@@ -392,7 +412,8 @@ def build_view(results: list[ReviewResult], config: dict[str, Any], history: dic
         }
     new_history = {"version": 1, "run_marker": run_marker, "updated": today.isoformat(), "jobs": jobs}
     return RunView(matches, watch, near, hidden, dropped, flags, decisions, baseline, new_history,
-                   closing_days=closing_days, closing_soon_days=window)
+                   closing_days=closing_days, closing_soon_days=window,
+                   failed_searches=list(failed_searches or []))
 
 
 def closes_in_text(days: int, closes: date) -> str:

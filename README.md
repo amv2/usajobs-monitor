@@ -259,7 +259,7 @@ usajobs-monitor run --preview-delivery --config ~/usajobs/usajobs-monitor.toml
 
 How delivery behaves:
 
-- **A failed run never sends reports.** If the search or report validation fails, each channel gets a short fixed notice and no attachments, never error text. Set `delivery.notify_on_failure = false` to skip the notice.
+- **A failed run never sends reports.** If the search (more than half of its searches) or report validation fails, each channel gets a short fixed notice and no attachments, never error text. Set `delivery.notify_on_failure = false` to skip the notice.
 - **Nothing is sent twice.** Each channel records its result in the run folder (`delivery-email.json` and so on). Once a channel has accepted a run, or might have (a connection dropped mid-send), it won't send that run again. Only failures that prove nothing went out, such as a refused connection or a temporary rejection, are retried, up to `delivery.max_attempts` times.
 - **"Accepted" means the server took the message.** It doesn't prove it reached your inbox or phone.
 - **Retry a delivery without searching again** with `usajobs-monitor deliver <run id>` (or `deliver latest`). Channels that already accepted the run are skipped. If a channel says acceptance is uncertain, check whether the message arrived; to send it anyway, delete that channel's `delivery-<channel>.json` from the run folder and retry.
@@ -552,7 +552,7 @@ Good habits:
 ## How a run works
 
 1. Load and validate the profile, then read credentials from the environment, falling back to the keychain.
-2. Run each search, paging through every result. Network errors, rate limits (HTTP 429) and server errors are retried with backoff.
+2. Run each search, paging through every result. Network errors, rate limits (HTTP 429) and server errors are retried with backoff. If a search still fails, the run carries on without it and is marked incomplete: the digest and reports name the failed searches, and nothing is reported as dropped. If more than half of the searches fail, the whole run fails instead.
 3. Remove duplicates across searches by control number.
 4. Review each job: hiring-path eligibility, temporary appointment, executive pay plan or title, occupation fit, excluded series, target role signal, and salary. Each failed check is recorded with a reason.
 5. Sort jobs into matches, watch list and near misses, and score the matches.
