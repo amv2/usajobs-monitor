@@ -43,8 +43,8 @@ from .reports import (
     write_word,
 )
 from .review import review_job, target_agency_hit
-from .tracking import (HISTORY_NAME, UNREADABLE_SUFFIX, RunView, baseline_text, build_view, incomplete_text,
-                       load_decisions, read_history, watch_list_label)
+from .tracking import (HISTORY_NAME, UNREADABLE_SUFFIX, RunView, build_view, incomplete_text, load_decisions,
+                       read_history, watch_list_label)
 
 SUMMARY = SUMMARY_NAME
 HISTORY = HISTORY_NAME

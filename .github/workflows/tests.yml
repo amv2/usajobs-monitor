@@ -2,17 +2,26 @@ name: tests
 
 # Runs the offline test suite. Uses no secrets and never calls USAJOBS or a model,
 # so it is safe on pull requests from forks.
+#
+# The weekly run reinstalls the latest dependencies and audits them, so a breaking
+# upstream release or a new advisory shows up within a week even when nothing here
+# changed. It runs only in amv2/usajobs-monitor, not in copies made from the
+# template. GitHub turns scheduled workflows off after 60 days without repository
+# activity; see docs/RELEASING.md.
 on:
   push:
     branches: [main]
   pull_request:
   workflow_dispatch:
+  schedule:
+    - cron: "17 9 * * 1"   # Mondays 09:17 UTC
 
 permissions:
   contents: read
 
 jobs:
   test:
+    if: github.event_name != 'schedule' || github.repository == 'amv2/usajobs-monitor'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     strategy:
@@ -38,6 +47,7 @@ jobs:
         run: python -m unittest discover -s tests -v
 
   docker:
+    if: github.event_name != 'schedule' || github.repository == 'amv2/usajobs-monitor'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -57,3 +67,49 @@ jobs:
           status=0
           docker run --rm -e USAJOBS_SCHEDULE_DAYS=funday usajobs-monitor:ci schedule || status=$?
           test "$status" -eq 2
+
+  lint:
+    if: github.event_name != 'schedule' || github.repository == 'amv2/usajobs-monitor'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+
+      # Ruff's default rules only (pyflakes plus syntax errors): real mistakes, not style.
+      - name: Ruff
+        run: |
+          python -m pip install ruff==0.17.1
+          ruff check --isolated --select E4,E7,E9,F src tests scripts
+
+  # Reports, never blocks: an advisory with no fix yet would otherwise fail every
+  # pull request. It runs weekly (GitHub emails a failed scheduled run) and on demand.
+  audit:
+    if: >-
+      (github.event_name == 'schedule' && github.repository == 'amv2/usajobs-monitor')
+      || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+
+      # Installs the package with every extra in its own environment, then audits
+      # exactly those packages for known vulnerabilities (pip-audit lives outside it).
+      - name: Audit dependencies
+        run: |
+          python -m venv "$RUNNER_TEMP/app"
+          "$RUNNER_TEMP/app/bin/python" -m pip install -e ".[ai,mcp,keyring]"
+          "$RUNNER_TEMP/app/bin/python" -m pip freeze --exclude-editable > "$RUNNER_TEMP/installed.txt"
+          python -m pip install pip-audit==2.10.1
+          pip-audit -r "$RUNNER_TEMP/installed.txt" --no-deps --disable-pip --progress-spinner off

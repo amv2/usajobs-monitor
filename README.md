@@ -591,11 +591,13 @@ pip install -e ".[ai,mcp,keyring]"   # the extras are optional; tests that need 
 python -m unittest discover -s tests
 ```
 
-Without installing, `PYTHONPATH=src python -m unittest discover -s tests` works too. The [tests workflow](https://github.com/amv2/usajobs-monitor/blob/main/.github/workflows/tests.yml) runs the same suite on Python 3.11 to 3.14, on Linux and Windows, for every pull request.
+Without installing, `PYTHONPATH=src python -m unittest discover -s tests` works too. The [tests workflow](https://github.com/amv2/usajobs-monitor/blob/main/.github/workflows/tests.yml) runs the same suite on Python 3.11 to 3.14, on Linux and Windows, for every pull request and once a week against the latest dependencies. Pull requests also run `ruff check --select E4,E7,E9,F` (unused imports and real mistakes, not style); the weekly run adds `pip-audit` on the installed dependencies.
 
 Releases are cut as described in [docs/RELEASING.md](https://github.com/amv2/usajobs-monitor/blob/main/docs/RELEASING.md).
 
 Please don't attach real configs, decisions files or reports to issues. Use the sample profile, or redact your copy first.
+
+Found a security problem? Please report it privately as described in [SECURITY.md](https://github.com/amv2/usajobs-monitor/blob/main/SECURITY.md), not in a public issue.
 
 ## License
 
