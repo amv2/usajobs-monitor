@@ -278,6 +278,7 @@ Allow the whole command line, exactly: `export USAJOBS_ALLOW_AI_PROVIDER='my-mod
 ## Privacy and safety, for every option
 
 - Your resume is read on your computer. It's sent only when `send_resume = true`, only with postings from your own search, and only to the provider you picked.
+- With a folder of resume versions, every version goes with each posting by default. `resume_choice = "match"` sends only the version that fits each posting, picked on your computer before anything is sent ([CONFIG_REFERENCE.md](CONFIG_REFERENCE.md#ai-optional-ai-add-on)).
 - The posting and your resume go to the model as data, with instructions to ignore any instructions inside them. The Claude CLI option runs with every tool off; Codex and Gemini run read-only.
 - A shared profile can't turn on a program-based provider by itself, or send your resume and key to an unknown `base_url`: you have to allow it with `USAJOBS_ALLOW_AI_PROVIDER`. Read any shared profile's `[ai]` table before you do.
 - With `openai`, your key is sent only to `base_url`, over `https` (plain `http` only to a server on your computer), and redirects are never followed.

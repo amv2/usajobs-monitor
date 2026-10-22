@@ -459,7 +459,19 @@ Every provider except `anthropic` and `openai` runs a program on your computer, 
 
 With `rank = true`, each list is sorted by fit level: strong, possible, then postings without a note, then stretch and unlikely. Nothing is dropped, so a wrong "unlikely" only moves a job down. The AI judges the minimum qualifications from your resume, not how the assessment questionnaire will place you.
 
-Notes are cached by posting, resume and model, so a run three times a week pays only for postings it hasn't reviewed yet. Changing your resume refreshes them. With several resume versions (a folder), each posting is judged by the version that fits it best, and the reports name it, for example "Strong (resume: Budget Director)". Every version goes into each prompt, ahead of the posting, so with the `anthropic` provider (and `openai` services that cache prompts) the resumes are cached after the first posting of a run and later postings read them at a fraction of the price. A folder you keep adding tailored copies to is fine: past 5 versions, the 5 most recently changed are used. Adding or editing a resume re-rates cached postings once. A failed note never fails the run: the reports still publish, and the reason is in the run summary.
+Notes are cached by posting, resume and model, so a run three times a week pays only for postings it hasn't reviewed yet. Changing your resume refreshes them. With several resume versions (a folder), each posting is judged by the version that fits it best, and the reports name it, for example "Strong (resume: Budget Director)". By default every version goes into each prompt, ahead of the posting, and the AI picks; with the `anthropic` provider (and `openai` services that cache prompts) the resumes are cached after the first posting of a run and later postings read them at a fraction of the price. A folder you keep adding tailored copies to is fine: past 5 versions, the 5 most recently changed are used.
+
+To send each posting only the version that fits it, set `resume_choice = "match"`. The tool picks on your computer, before anything is sent: first by your own rules, then by which version's distinctive wording best matches the posting's title and qualifications. Prompts get smaller, and less of your resume leaves your computer. The wording pick is deliberately cautious: when no version is well ahead, that posting gets every version as before, so with several similar resumes most postings may still get all of them. Rules are the surest way to steer it. The fit notes say how each version was picked, and `fit <control number> --preview` shows the pick without sending anything. Rules map a version to job series or title words, checked in order:
+
+```toml
+[ai]
+resume_choice = "match"
+
+[ai.resume_rules]
+"Budget Director" = ["0560", "budget"]   # series 0560, or "budget" in the title
+Policy            = ["0301", "policy*"]
+```
+ Adding or editing a resume re-rates cached postings once. A failed note never fails the run: the reports still publish, and the reason is in the run summary.
 
 To check one posting first, or to see exactly what would be sent:
 
@@ -577,11 +589,7 @@ Good habits:
 | 8 | Closing-soon alerts with a configurable window, application tracking (interview, offer, rejected, withdrawn, application dates, days waiting), shorter per-job fit lines in email, and installing from PyPI with `pipx` | Done (v0.3.0) |
 | 9 | Runs survive a single failed search (marked incomplete, failed searches named, nothing reported dropped), a security policy with private vulnerability reporting, and weekly CI with a dependency audit | Done (v0.3.1) |
 
-Phases 1 to 6 shipped in v0.1.0. Ideas under consideration, not promises:
-
-- Choosing which resume version to send for each job, rather than sending every version in each prompt.
-
-Suggestions are welcome as issues.
+Phases 1 to 6 shipped in v0.1.0. Ideas and suggestions are welcome as issues.
 
 ## Contributing
 

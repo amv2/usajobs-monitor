@@ -112,6 +112,7 @@ AI_PROVIDER_PATH = r"[A-Za-z_][\w.]*:[A-Za-z_]\w*"  # or "package.module:factory
 AI_ALLOW_ENV = "USAJOBS_ALLOW_AI_PROVIDER"
 AI_EFFORTS = ("low", "medium", "high", "xhigh", "max")
 AI_LISTS = ("matches", "watch_list", "near_misses")
+AI_RESUME_CHOICES = ("all", "match")  # see resume_choice.py
 DEFAULT_AI_MODEL = "claude-opus-5-5"
 DEFAULT_AI_KEY_ENV = "ANTHROPIC_API_KEY"
 
@@ -542,9 +543,9 @@ def _check_ai(check: _Checker, config: dict[str, Any]) -> None:
         check.error("ai.api_key", "secrets are read only from environment variables or the keychain; remove it and set "
                     + str(ai.get("api_key_env") or DEFAULT_AI_KEY_ENV))
         del ai["api_key"]
-    check.unknown(ai, path, {"provider", "model", "effort", "api_key_env", "command", "resume", "send_resume",
-                             "fit_notes", "rank", "lists", "max_jobs", "timeout_seconds", "base_url",
-                             "response_format"})
+    check.unknown(ai, path, {"provider", "model", "effort", "api_key_env", "command", "resume", "resume_choice",
+                             "resume_rules", "send_resume", "fit_notes", "rank", "lists", "max_jobs",
+                             "timeout_seconds", "base_url", "response_format"})
     check.string(ai, "provider", path, "anthropic")
     provider = ai.get("provider")
     if isinstance(provider, str) and provider not in AI_PROVIDERS and not re.fullmatch(AI_PROVIDER_PATH, provider):
@@ -581,6 +582,15 @@ def _check_ai(check: _Checker, config: dict[str, Any]) -> None:
     if provider == "command" and not ai.get("command"):
         check.error("ai.command", 'required with provider = "command": the program and its arguments, as a list')
     check.string(ai, "resume", path, "")
+    check.string(ai, "resume_choice", path, "all", choices=AI_RESUME_CHOICES)
+    rules = ai.setdefault("resume_rules", {})
+    if not isinstance(rules, dict):
+        check.error("ai.resume_rules", 'expected a table: a resume version\'s name = ["0501", "budget", ...]')
+        ai["resume_rules"] = {}
+    for name in list(rules):
+        check.strings(rules, name, "ai.resume_rules", [])
+    if rules and ai.get("resume_choice") != "match":
+        check.warnings.append('ai.resume_rules: used only with ai.resume_choice = "match"; ignored until then')
     check.boolean(ai, "send_resume", path, False)
     check.boolean(ai, "fit_notes", path, False)
     check.boolean(ai, "rank", path, False)

@@ -14,7 +14,7 @@ from pathlib import Path
 TEXT_SUFFIXES = {".md", ".markdown", ".txt", ".text"}
 SUPPORTED_SUFFIXES = TEXT_SUFFIXES | {".docx", ".pdf"}
 MAX_RESUME_CHARS = 60_000  # about 15 pages; longer files are almost always the wrong file
-MAX_RESUMES = 5  # versions compared at once; each one adds to every prompt
+MAX_RESUMES = 5  # versions compared at once; each one adds to every prompt that sends them all
 
 
 class ResumeError(Exception):
@@ -76,8 +76,12 @@ def read_resumes(paths: list[Path]) -> str:
     """One resume as plain text, or several, each marked with its short name."""
     if len(paths) == 1:
         return read_resume(paths[0])
-    return "\n\n".join(f'<resume_version name="{name}">\n{read_resume(path)}\n</resume_version>'
-                        for name, path in zip(resume_names(paths), paths))
+    return wrap_versions(resume_names(paths), [read_resume(path) for path in paths])
+
+
+def wrap_versions(names: list[str], texts: list[str]) -> str:
+    return "\n\n".join(f'<resume_version name="{name}">\n{text}\n</resume_version>'
+                        for name, text in zip(names, texts))
 
 
 def read_resume(path: Path) -> str:

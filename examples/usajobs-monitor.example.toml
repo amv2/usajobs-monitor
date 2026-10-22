@@ -127,6 +127,7 @@ formats = ["html", "csv"]   # also "docx" (Word briefing) and "xlsx" (Excel trac
 # explains each provider and what it needs. Pick one provider line:
 # [ai]
 # resume      = "resume.md"   # .md, .txt, .docx or .pdf, or a folder of versions
+# resume_choice = "match"     # with a folder: send each posting only the version that fits it
 # send_resume = true
 # fit_notes   = true
 # rank        = true          # stronger fits first; nothing is hidden
