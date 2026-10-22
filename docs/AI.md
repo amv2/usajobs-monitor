@@ -257,7 +257,7 @@ model    = "qwen3-8b"                   # the model name the server shows
 timeout_seconds = 600                   # local models can be slow
 ```
 
-Start the server first (in LM Studio, the Developer tab; Ollama runs on its own). Plain `http` is allowed only for `localhost`, `127.0.0.1` and, from inside Docker, `host.docker.internal`. A model server on another computer needs `https`. If a small model's answers don't parse, try `response_format = "json_object"` or a larger model.
+Start the server first (in LM Studio, the Developer tab; Ollama runs on its own). Plain `http` is allowed only for `localhost`, `127.0.0.1` and, from inside Docker, `host.docker.internal`. Use `host.docker.internal` only when the tool runs in a Docker container; outside Docker, use `localhost`, because the tool trusts that name without checking where it points and would send your key and resume to it unencrypted. A model server on another computer needs `https`. If a small model's answers don't parse, try `response_format = "json_object"` or a larger model.
 
 ## 7. Any other program or model
 
