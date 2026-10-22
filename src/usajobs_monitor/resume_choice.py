@@ -27,7 +27,9 @@ from .resume_text import ResumeError, pick_resumes, read_resume, resume_names, w
 from .review import contains_term
 
 # The best version must score this much above the next one, else the AI compares them all.
-CLEAR_LEAD = 1.15
+# Set from a real folder of four similar budget resumes: below about 1.3 the wording pick
+# disagreed with the AI as often as it agreed, so close calls go to the AI.
+CLEAR_LEAD = 1.3
 TITLE_WEIGHT = 3
 # The parts of a posting that say what experience it wants (QualificationSummary is on
 # the posting itself, the rest under its details).
