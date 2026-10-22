@@ -12,7 +12,7 @@ import tempfile
 import unittest
 from unittest import mock
 
-from usajobs_monitor import fit, resume_text
+from usajobs_monitor import fit, resume_choice, resume_text
 from usajobs_monitor.config import ConfigError, load_settings, validate_config
 from usajobs_monitor.fit import FitError
 from usajobs_monitor.review import review_job
@@ -364,6 +364,98 @@ class FitNoteTests(unittest.TestCase):
         outcome = fit.run_fit_notes(settings, self.view(settings, [job()]), self.out, date.today(), FakeProvider())
         self.assertEqual(outcome["status"], "error")
         self.assertIn("gone.md", outcome["message"])
+
+
+class ResumeChoiceTests(unittest.TestCase):
+    """ai.resume_choice = "match": one version per posting, picked on this computer."""
+
+    def setUp(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.base = Path(temp.name)
+        folder = self.base / "resumes"
+        folder.mkdir()
+        (folder / "Pat Lee - Budget.md").write_text(
+            "Budget analyst. Budget formulation and execution, appropriations, apportionment, fund control.")
+        (folder / "Pat Lee - Policy.md").write_text(
+            "Policy analyst. Regulatory policy, rulemaking, legislative analysis, stakeholder briefings.")
+        self.out = self.base / "run"
+        self.out.mkdir()
+
+    def settings(self, **ai):
+        ai = {"fit_notes": True, "send_resume": True, "resume": "resumes", "resume_choice": "match", **ai}
+        return load_settings(self.base / "p.toml", require_credentials=False, raw={**BASE, "ai": ai})
+
+    def resumes(self, **ai):
+        settings = self.settings(**ai)
+        return resume_choice.load_resume_set(settings.ai_resume, None, settings.config["ai"])
+
+    def test_config_defaults_and_errors(self):
+        ai = validate_config({**BASE})[0]["ai"]
+        self.assertEqual((ai["resume_choice"], ai["resume_rules"]), ("all", {}))
+        with self.assertRaises(ConfigError) as caught:
+            validate_config({**BASE, "ai": {"resume_choice": "best", "resume_rules": {"Budget": "0560"}}})
+        self.assertIn("ai.resume_choice", str(caught.exception))
+        self.assertIn("ai.resume_rules.Budget", str(caught.exception))
+        warnings = validate_config({**BASE, "ai": {"resume_rules": {"Budget": ["0560"]}}})[1]
+        self.assertTrue(any('ai.resume_rules: used only with ai.resume_choice = "match"' in w for w in warnings))
+
+    def test_closest_wording_wins(self):
+        resumes = self.resumes()
+        self.assertEqual(resumes.names, ["Budget", "Policy"])
+        pick = resumes.pick(job(title="Budget Analyst"))
+        self.assertEqual((pick.name, pick.reason, pick.names), ("Budget", "closest wording to the posting", []))
+        self.assertNotIn("Policy analyst", pick.text)
+        policy = {**job(title="Regulatory Policy Analyst"), "QualificationSummary": "Experience in rulemaking."}
+        self.assertEqual(resumes.pick(policy).name, "Policy")
+
+    def test_no_clear_winner_sends_every_version(self):
+        resumes = self.resumes()
+        pick = resumes.pick({**job(title="Program Manager"), "QualificationSummary": "Leadership.",
+                             "UserArea": {"Details": {}}})
+        self.assertEqual((pick.name, pick.names), ("", ["Budget", "Policy"]))
+        self.assertIn('<resume_version name="Policy">', pick.text)
+
+    def test_rules_come_first_in_the_order_written(self):
+        resumes = self.resumes(resume_rules={"Policy": ["0560", "budget"], "Pat Lee - Budget.md": ["policy"]})
+        by_series = {**job(title="Analyst"), "JobCategory": [{"Code": "0560"}]}
+        self.assertEqual((resumes.pick(by_series).name, resumes.pick(by_series).reason),
+                         ("Policy", "your rule: series 0560"))
+        # "budget" names the Policy version, and that rule is written first.
+        pick = resumes.pick(job(title="Budget and Policy Analyst"))
+        self.assertEqual((pick.name, pick.reason), ("Policy", 'your rule: "budget" in the title'))
+
+    def test_all_keeps_every_version_in_every_prompt(self):
+        pick = self.resumes(resume_choice="all").pick(job(title="Budget Analyst"))
+        self.assertEqual((pick.name, pick.names), ("", ["Budget", "Policy"]))
+
+    def test_unknown_rule_name_stops_fit_notes_with_the_names(self):
+        settings = self.settings(resume_rules={"Director": ["0340"]})
+        view = build_view([review_job(job(), settings.config)], settings.config, None, {}, date(2026, 10, 17), "m")
+        outcome = fit.run_fit_notes(settings, view, self.out, date.today(), FakeProvider())
+        self.assertEqual(outcome["status"], "error")
+        self.assertIn('no resume version named "Director"; the versions are "Budget", "Policy"', outcome["message"])
+
+    def test_run_sends_one_version_and_says_which(self):
+        settings = self.settings()
+        provider = FakeProvider({**GOOD_ANSWER, "resume_used": ""})
+        view = build_view([review_job(job("1"), settings.config)], settings.config, None, {}, date(2026, 10, 17), "m")
+        outcome = fit.run_fit_notes(settings, view, self.out, date.today(), provider)
+        prompt = provider.calls[0][1]
+        self.assertIn("<resume>\nBudget analyst.", prompt)
+        self.assertNotIn("Policy analyst", prompt)
+        self.assertNotIn("<resume_version", prompt)
+        self.assertEqual(outcome["one_resume_sent"], 1)
+        self.assertEqual(view.fit_text(view.matches[0]), "Possible (resume: Budget)")
+        self.assertIn("Best resume for this posting: Budget (picked before sending: closest wording to the posting)",
+                      (self.out / fit.FIT_NOTES_NAME).read_text())
+        # The next run reads the note from the cache and still names the version.
+        again = FakeProvider()
+        view = build_view([review_job(job("1"), settings.config)], settings.config, None, {}, date(2026, 10, 17), "m")
+        (settings.reports_dir).mkdir(parents=True, exist_ok=True)
+        (settings.reports_dir / fit.FIT_CACHE_NAME).write_text((self.out / fit.FIT_CACHE_NAME).read_text())
+        fit.run_fit_notes(settings, view, self.out, date.today(), again)
+        self.assertEqual((again.calls, view.fit_resumes), ([], {"1": "Budget"}))
 
 
 class RankedRunTests(unittest.TestCase):

@@ -208,5 +208,26 @@ class FitCommandTests(unittest.TestCase):
         self.assertIn("- No formulation", out)
 
 
+    def test_match_sends_one_version_and_names_it(self):
+        folder = self.base / "resumes"
+        folder.mkdir()
+        (folder / "Budget.md").write_text("BUDGET BODY")
+        (folder / "Policy.md").write_text("POLICY BODY")
+        ai = {"resume": "resumes", "resume_choice": "match", "resume_rules": {"Policy": ["budget"]}}
+        code, out, _ = self.run_cli(ai, "--preview")
+        self.assertEqual(code, 0)
+        self.assertIn('for the Policy version (your rule: "budget" in the title)', out)
+        self.assertIn("POLICY BODY", out)
+        self.assertNotIn("BUDGET BODY", out)
+        answer = json.dumps({"fit": "possible", "summary": "Close.", "resume_used": "", "strengths": [], "gaps": [],
+                             "resume_tips": [], "questions_to_verify": []})
+        provider = mock.Mock(complete=mock.Mock(return_value=answer))
+        with mock.patch.object(fit, "make_provider", return_value=provider):
+            code, out, _ = self.run_cli({**ai, "send_resume": True})
+        self.assertEqual(code, 0)
+        self.assertIn('Best resume for this posting: Policy (picked before sending: your rule: "budget" in the title)', out)
+        self.assertNotIn("BUDGET BODY", provider.complete.call_args[0][1])
+
+
 if __name__ == "__main__":
     unittest.main()
