@@ -572,6 +572,7 @@ Good habits:
 | 5 | Optional AI add-on: résumé fit notes and an MCP server. The core never requires AI. | Done |
 | 6 | Docker image and compose example with a built-in scheduler | Done |
 | 7 | AI fit ranking (strong, possible, stretch, unlikely) with an "AI gaps" line, several resume versions with the best one named per job, resume-first prompt caching, and ready-made providers for the Claude Code, Codex and Gemini CLIs and Ollama ([docs/AI.md](https://github.com/amv2/usajobs-monitor/blob/main/docs/AI.md)) | Done (v0.2.0) |
+| 8 | Closing-soon alerts with a configurable window, application tracking (interview, offer, rejected, withdrawn, application dates, days waiting), shorter per-job fit lines in email, and installing from PyPI with `pipx` | Done (v0.3.0) |
 
 Phases 1 to 6 shipped in v0.1.0. Ideas under consideration, not promises:
 
