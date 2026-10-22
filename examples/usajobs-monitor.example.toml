@@ -12,7 +12,7 @@ version = 1
 [paths]
 # Relative paths resolve against this file's folder.
 reports_dir    = "reports"              # briefing, tracker, last_run.json, history
-decisions_file = "job_decisions.csv"    # your applied / not_interested / watching marks
+decisions_file = "job_decisions.csv"    # your applied / interview / not_interested / ... marks
 resume_folder  = ""                     # optional; PDFs here are listed in the briefing
 
 [profile]

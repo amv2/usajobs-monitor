@@ -17,7 +17,7 @@ Template: [examples/usajobs-monitor.example.toml](../examples/usajobs-monitor.ex
 3. **Match**: no reasons.
 4. **Watch list**: the *only* reason is pay, and the posting's grade range includes a `watch_list` grade at a `watch_list` pay plan.
 5. **Near miss**: failed only on pay, eligibility route, or appointment type, and clears the near-miss pay and grade floors. Any **hard-no** reason (mismatch, executive, excluded series, another agency's internal posting, no role signal) keeps it off this list.
-6. **Hidden**: anything marked `not_interested` in the decisions file, whatever its list.
+6. **Hidden**: anything marked `not_interested`, `rejected` or `withdrawn` in the decisions file, whatever its list.
 
 ## Credentials (environment or keychain)
 
@@ -35,7 +35,7 @@ With the optional extra (`pip install "usajobs-monitor[keyring]"`), any credenti
 | Key | Default | Meaning |
 |---|---|---|
 | `reports_dir` | `"reports"` | Where the reports (see `report.formats`), `usajobs_last_run.json` and run history go. |
-| `decisions_file` | `"job_decisions.csv"` | Your decisions by control number: `applied`, `watching`, or `not_interested` (the not-interested list; those postings are hidden on every run). Columns: `control_number,status,note`; other columns are ignored and kept. `usajobs-monitor decide` edits it for you and also fills `title` and `decided_on`. |
+| `decisions_file` | `"job_decisions.csv"` | Your decisions by control number. `applied`, `interview` and `offer` are applications in progress and `watching` is a job you're keeping an eye on; all four are flagged on every run. `not_interested`, `rejected` and `withdrawn` postings are hidden on every run. Columns: `control_number,status,note`, plus `title`, `agency`, `applied_on` (the day you applied, kept through later status changes) and `decided_on` (the day of the latest change), which `usajobs-monitor decide` fills in and adds to the file if they're missing. Other columns are kept. A row marked `applied` with no `applied_on` uses its `decided_on`. Changing a status without a new note keeps the old note. `usajobs-monitor decide` with no arguments lists active applications with days waiting and marks any with no update in 30 days. |
 | `resume_folder` | `""` | Optional. PDFs found here are listed in the briefing. |
 
 Relative paths resolve against the config file's folder, not the current directory.
@@ -159,7 +159,7 @@ When presets disagree, `excepted` beats `competitive` for `service` (an excepted
 |---|---|---|
 | `report.title` | `"USAJOBS Job Monitor"` | Title on every report. The "Active filters" paragraph is generated from this config. |
 | `report.formats` | `["docx", "xlsx"]` | Which reports to write: `html` (`usajobs_digest.html`, a self-contained page that opens in any browser), `csv` (`usajobs_jobs.csv`, every reviewed job with the list it landed on), `docx` (Word briefing), `xlsx` (Excel tracker). The default keeps older configs writing what they always did; `init` writes `["html", "csv"]`. |
-| `report.closing_soon_days` | `3` | 1 to 14. A listed job closing within this many days (counting today) is flagged CLOSING SOON, and delivered messages open with a "Closing soon" list of those jobs, soonest first, labeled "closes today", "closes tomorrow" or the weekday. That list is not cut by `delivery.max_items`. Jobs you marked `applied` are left out. Set it to the longest gap between your runs plus a day or two, so one missed run still flags a deadline: 3 to 5 for a Monday/Wednesday/Friday schedule, 8 or more for weekly. |
+| `report.closing_soon_days` | `3` | 1 to 14. A listed job closing within this many days (counting today) is flagged CLOSING SOON, and delivered messages open with a "Closing soon" list of those jobs, soonest first, labeled "closes today", "closes tomorrow" or the weekday. That list is not cut by `delivery.max_items`. Jobs you marked `applied`, `interview` or `offer` are left out. Set it to the longest gap between your runs plus a day or two, so one missed run still flags a deadline: 3 to 5 for a Monday/Wednesday/Friday schedule, 8 or more for weekly. |
 | `scoring.*` | see sample | Ranking weights and pay tiers. Optional; the defaults equal today's behavior. |
 
 ## `[delivery]`

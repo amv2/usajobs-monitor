@@ -184,7 +184,10 @@ def cmd_profiles(args: argparse.Namespace) -> int:
 
 
 def cmd_decide(args: argparse.Namespace) -> int:
-    from .tracking import load_decisions, load_history, save_decision
+    from datetime import date
+
+    from .tracking import (HIDDEN_STATUSES, STATUS_HELP, decision_lines, load_decisions, load_history,
+                           normalize_status, save_decision)
 
     settings = load_settings(args.config, require_credentials=False)
     path = settings.decisions_path
@@ -193,22 +196,31 @@ def cmd_decide(args: argparse.Namespace) -> int:
         _print_warnings(warnings)
         if not decisions:
             print(f"No decisions yet in {path}.")
+        # Rows saved before title and agency were stored: fill them from recent run history.
+        seen_jobs = (load_history(settings.history_path) or {}).get("jobs") or {}
         for number, decision in decisions.items():
-            note = f"  {decision['note']}" if decision["note"] else ""
-            print(f"{number:<12} {decision['status']:<15}{note}")
+            for key in ("title", "agency"):
+                decision[key] = decision.get(key) or str((seen_jobs.get(number) or {}).get(key) or "")
+        for line in decision_lines(decisions, date.today()):
+            print(line)
         return 0
     if args.status is None:
-        print("decide: give a status: applied, watching, not_interested or clear", file=sys.stderr)
+        print(f"decide: give a status: {STATUS_HELP}", file=sys.stderr)
         return 2
     number = args.control_number.strip()
     seen = ((load_history(settings.history_path) or {}).get("jobs") or {}).get(number) or {}
     title = str(seen.get("title") or "")
     try:
-        previous = save_decision(path, number, args.status, " ".join(args.note), title)
+        applied_on = date.fromisoformat(args.applied_on) if args.applied_on else None
+    except ValueError:
+        print("decide: --applied-on takes a date like 2026-10-14", file=sys.stderr)
+        return 2
+    try:
+        previous = save_decision(path, number, args.status, " ".join(args.note), title,
+                                 agency=str(seen.get("agency") or ""), applied_on=applied_on)
     except ValueError as exc:
         print(f"decide: {exc}", file=sys.stderr)
         return 2
-    from .tracking import normalize_status
     status = normalize_status(args.status)
     label = f"{number} ({title}, {seen.get('agency', '')})" if title else number
     if status == "clear":
@@ -216,7 +228,7 @@ def cmd_decide(args: argparse.Namespace) -> int:
     else:
         print(f"Marked {label} as {status.replace('_', ' ')}"
               + (f" (was {previous.get('status')})" if previous else "") + f". Saved in {path}.")
-        if status == "not_interested":
+        if status in HIDDEN_STATUSES:
             print("It is hidden from the next run's lists.")
     if not title:
         print("warning: this control number is not in the last run's history; check it against the USAJOBS link.",
@@ -467,11 +479,17 @@ def build_parser() -> argparse.ArgumentParser:
     search = add("search", "Search and write reports directly, without run isolation.", cmd_search)
     search.add_argument("--output-dir", type=Path, help="write reports here instead of paths.reports_dir")
     add("check-config", "Validate the config and report what a run would do. Never prints credentials.", cmd_check_config)
-    decide = add("decide", "Mark a job applied, watching or not interested (hidden from later runs), with an "
-                           "optional note. With no arguments, list your decisions.", cmd_decide)
+    decide = add("decide", "Record what you did about a job: applied, interview, offer, watching, or rejected, "
+                           "withdrawn and not_interested (hidden from later runs), with an optional note. With no "
+                           "arguments, list your applications with days waiting, then your other decisions.",
+                 cmd_decide)
     decide.add_argument("control_number", nargs="?", help="the number in the job's USAJOBS link")
-    decide.add_argument("status", nargs="?", help="applied, watching, not_interested, or clear to remove it")
-    decide.add_argument("note", nargs="*", help="optional note, e.g. \"applied 10/17, referred\"")
+    decide.add_argument("status", nargs="?", help="applied, interview, offer, rejected, withdrawn, watching, "
+                                                  "not_interested, or clear to remove it")
+    decide.add_argument("note", nargs="*", help="optional note, e.g. \"referred, interview 11/3\"")
+    decide.add_argument("--applied-on", metavar="YYYY-MM-DD",
+                        help="the day you applied, for an application made before you started tracking it "
+                             "(otherwise the day you first mark it applied)")
     fit = add("fit", "AI fit notes comparing your resume with one posting (needs the ai extra and "
                      "ai.send_resume = true; --preview shows what would be sent, without sending).", cmd_fit)
     fit.add_argument("control_number", help="the number in the job's USAJOBS link")
@@ -504,7 +522,14 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+    parser = build_parser()
+    args, extra = parser.parse_known_args(argv)
+    if extra:
+        # Before Python 3.12, note words after an option (decide 1 applied --applied-on DATE sent late)
+        # are left over instead of joining the note.
+        if getattr(args, "func", None) is not cmd_decide or any(word.startswith("-") for word in extra):
+            parser.error("unrecognized arguments: " + " ".join(extra))
+        args.note = [*args.note, *extra]
     try:
         if hasattr(args, "profile") and getattr(args, "resolve_config", True):
             from . import profiles

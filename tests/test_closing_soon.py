@@ -1,4 +1,4 @@
-"""CLOSING SOON: the configurable window, applied jobs, urgency wording, and the digest's lead section."""
+"""CLOSING SOON: the configurable window, jobs with an application in progress, urgency wording, and the digest's lead section."""
 
 import unittest
 from datetime import date, datetime, timezone
@@ -46,6 +46,14 @@ class WindowTests(unittest.TestCase):
         self.assertEqual(found.flags["1"], ["APPLIED"])
         self.assertEqual(found.flags["2"], ["CLOSING SOON", "WATCHING"])
         self.assertEqual(found.closing_soon_count(), 1)
+
+    def test_interview_and_offer_jobs_are_not_flagged(self):
+        decisions = {"1": {"status": "interview", "note": ""}, "2": {"status": "offer", "note": ""}}
+        jobs = [result("interview", [], number=1, close="2026-10-17"), result("offer", [], number=2, close="2026-10-17")]
+        found = view(jobs, decisions=decisions)
+        self.assertEqual(found.flags["1"], ["INTERVIEW"])
+        self.assertEqual(found.flags["2"], ["OFFER"])
+        self.assertEqual(found.closing_soon_count(), 0)
 
     def test_soonest_first_across_lists_once_each(self):
         jobs = [result("match +3", [], number=1, close="2026-10-19", score=9),

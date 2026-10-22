@@ -195,12 +195,20 @@ To record a decision, use the control number (the number at the end of the job's
 
 ```bash
 usajobs-monitor decide 812345600 applied "submitted 10/14"
+usajobs-monitor decide 812345600 applied --applied-on 2026-10-14   # record a past application date
+usajobs-monitor decide 812345600 interview "phone screen 11/3"
 usajobs-monitor decide 812349900 not_interested     # hidden from every later run
 usajobs-monitor decide 812349900 clear              # undo
-usajobs-monitor decide                              # list your decisions
+usajobs-monitor decide                              # list your decisions and active applications
 ```
 
-Status is one of `applied`, `watching` or `not_interested` (`not interested`, `not-interested` and `ni` work too). Decisions live in `paths.decisions_file`, a CSV you can also edit by hand:
+Status is one of:
+
+- `applied`, `interview` or `offer`: an application in progress. It's flagged on every run and left out of the "Closing soon" list.
+- `watching`: a job you're keeping an eye on. It's flagged on every run.
+- `not_interested`, `rejected` or `withdrawn`: hidden from every later run (`not interested`, `not-interested` and `ni` work too).
+
+`decide` with no arguments counts your decisions by status, then lists active applications with how many days ago you applied and marks any with no update in 30 days. Decisions live in `paths.decisions_file`, a CSV you can also edit by hand (`decide` adds the `title`, `agency`, `applied_on` and `decided_on` columns when it writes):
 
 ```csv
 control_number,status,note

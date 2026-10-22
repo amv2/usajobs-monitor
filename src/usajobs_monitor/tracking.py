@@ -16,7 +16,12 @@ from .reasons import Code, code_of, is_hard_no
 from .review import VERIFY_ELIGIBILITY_FLAG, ReviewResult, needs_eligibility_check
 
 HISTORY_NAME = "usajobs_job_history.json"
-DECISION_STATUSES = {"applied", "not_interested", "watching"}
+DECISION_STATUSES = {"applied", "interview", "offer", "rejected", "withdrawn", "not_interested", "watching"}
+# Postings with these statuses are hidden from later runs: you passed on them, or the application is over.
+HIDDEN_STATUSES = {"not_interested", "rejected", "withdrawn"}
+# Applications still in progress: flagged on every run and listed by ``decide`` with days waiting.
+ACTIVE_STATUSES = {"applied", "interview", "offer"}
+STALE_DAYS = 30
 HISTORY_KEEP_DAYS = 45
 NEAR_MISS_LIMIT = 15
 FIT_LABELS = {"strong": "Strong", "possible": "Possible", "stretch": "Stretch", "unlikely": "Unlikely"}
@@ -77,8 +82,26 @@ def is_watch_candidate(result: ReviewResult, config: dict[str, Any]) -> bool:
     return bool(numbers) and any(min(numbers) <= grade <= max(numbers) for grade in grades)
 
 
+def _iso_date(value: Any) -> str:
+    """A ``YYYY-MM-DD`` date from a hand-edited cell, or "" when it isn't one."""
+    text = str(value or "").strip().partition("T")[0]
+    try:
+        return date.fromisoformat(text).isoformat()
+    except ValueError:
+        return ""
+
+
+def _applied_on(row: dict[str, Any]) -> str:
+    """The date you applied. Files written before ``applied_on`` existed only have
+    ``decided_on``, which for a row still marked applied is the day you applied."""
+    applied = _iso_date(row.get("applied_on"))
+    if not applied and str(row.get("status") or "").strip().lower() == "applied":
+        applied = _iso_date(row.get("decided_on"))
+    return applied
+
+
 def load_decisions(path: Path) -> tuple[dict[str, dict[str, str]], list[str]]:
-    """Read applied / not-interested / watching decisions, keyed by control number."""
+    """Read your decisions (applied, interview, not interested, ...), keyed by control number."""
     decisions: dict[str, dict[str, str]] = {}
     warnings: list[str] = []
     if not path.is_file():
@@ -93,28 +116,43 @@ def load_decisions(path: Path) -> tuple[dict[str, dict[str, str]], list[str]]:
                 warnings.append(f"{path.name} line {line}: needs a numeric control_number and a status of "
                                 + ", ".join(sorted(DECISION_STATUSES)))
                 continue
-            decisions[number] = {"status": status, "note": str(row.get("note") or "").strip()}
+            decisions[number] = {"status": status, "note": str(row.get("note") or "").strip(),
+                                 "title": str(row.get("title") or "").strip(),
+                                 "agency": str(row.get("agency") or "").strip(),
+                                 "applied_on": _applied_on(row), "decided_on": _iso_date(row.get("decided_on"))}
     return decisions, warnings
 
 
 DECISION_ALIASES = {"not_interested": "not_interested", "not": "not_interested", "no": "not_interested",
                     "ni": "not_interested", "hide": "not_interested", "watch": "watching", "watching": "watching",
-                    "applied": "applied", "apply": "applied", "clear": "clear", "remove": "clear", "undo": "clear"}
-DECISION_COLUMNS = ["control_number", "status", "note", "title", "decided_on"]
+                    "applied": "applied", "apply": "applied",
+                    "interview": "interview", "interviewing": "interview", "interviewed": "interview",
+                    "offer": "offer", "offered": "offer",
+                    "rejected": "rejected", "reject": "rejected", "not_referred": "rejected",
+                    "not_selected": "rejected",
+                    "withdrawn": "withdrawn", "withdraw": "withdrawn", "withdrew": "withdrawn",
+                    "clear": "clear", "remove": "clear", "undo": "clear"}
+STATUS_HELP = "applied, interview, offer, rejected, withdrawn, watching, not_interested or clear"
+DECISION_COLUMNS = ["control_number", "status", "note", "title", "agency", "applied_on", "decided_on"]
 
 
 def normalize_status(value: str) -> str:
     """'not interested', 'not-interested' and 'NI' all mean not_interested; 'clear' removes a decision."""
     key = re.sub(r"[\s-]+", "_", value.strip().lower())
     if key not in DECISION_ALIASES:
-        raise ValueError(f"unknown status \"{value}\"; use applied, watching, not_interested or clear")
+        raise ValueError(f"unknown status \"{value}\"; use {STATUS_HELP}")
     return DECISION_ALIASES[key]
 
 
 def save_decision(path: Path, number: str, status: str, note: str = "", title: str = "",
-                  today: date | None = None) -> dict[str, str] | None:
+                  today: date | None = None, agency: str = "", applied_on: date | None = None) -> dict[str, str] | None:
     """Add, replace or (with status "clear") remove one decision row, keeping the
-    file's other rows and columns as they are. Returns the row it replaced."""
+    file's other rows and columns. Returns the row it replaced.
+
+    ``decided_on`` is the day of the latest change. ``applied_on`` is set the day a job
+    is marked applied and carried over through later changes (interview, rejected, ...).
+    Pass ``applied_on`` for an application made before you started tracking it. With no
+    new note, the previous note is kept."""
     number = number.strip()
     if not number.isdigit():
         raise ValueError("the control number is the number in the job's USAJOBS link, e.g. 812345600")
@@ -126,7 +164,7 @@ def save_decision(path: Path, number: str, status: str, note: str = "", title: s
             reader = csv.DictReader(f)
             columns = list(reader.fieldnames or columns)
             rows = [dict(row) for row in reader]
-        for required in ("control_number", "status", "note"):
+        for required in DECISION_COLUMNS:
             if required not in columns:
                 columns.append(required)
     previous = None
@@ -137,8 +175,15 @@ def save_decision(path: Path, number: str, status: str, note: str = "", title: s
         else:
             kept.append(row)
     if status != "clear":
-        row = {"control_number": number, "status": status, "note": note.strip(), "title": title,
-               "decided_on": (today or date.today()).isoformat()}
+        today = today or date.today()
+        applied = applied_on.isoformat() if applied_on else _applied_on(previous or {})
+        if not applied and status == "applied":
+            applied = today.isoformat()
+        row = {"control_number": number, "status": status,
+               "note": note.strip() or str((previous or {}).get("note") or ""),
+               "title": title or str((previous or {}).get("title") or ""),
+               "agency": agency or str((previous or {}).get("agency") or ""),
+               "applied_on": applied, "decided_on": today.isoformat()}
         kept.append({key: value for key, value in row.items() if key in columns})
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(f".{path.name}.tmp")
@@ -242,7 +287,10 @@ class RunView:
         if not decision:
             return ""
         label = decision["status"].replace("_", " ")
-        return f"{label} ({decision['note']})" if decision["note"] else label
+        details = [decision["note"]] if decision["note"] else []
+        if decision["status"] in ACTIVE_STATUSES and decision.get("applied_on"):
+            details.append(f"applied {decision['applied_on']}")
+        return f"{label} ({'; '.join(details)})" if details else label
 
     def new_count(self, items: list[ReviewResult]) -> int:
         return sum("NEW" in self.flags.get(job_id(r.job), []) for r in items)
@@ -265,7 +313,7 @@ class RunView:
 
 def build_view(results: list[ReviewResult], config: dict[str, Any], history: dict[str, Any] | None,
                decisions: dict[str, dict[str, str]], today: date, run_marker: str) -> RunView:
-    hidden_ids = {number for number, d in decisions.items() if d["status"] == "not_interested"}
+    hidden_ids = {number for number, d in decisions.items() if d["status"] in HIDDEN_STATUSES}
     hidden = [r for r in results if job_id(r.job) in hidden_ids]
     visible = [r for r in results if job_id(r.job) not in hidden_ids]
     matches = sorted((r for r in visible if r.kept), key=lambda r: r.score, reverse=True)
@@ -296,12 +344,12 @@ def build_view(results: list[ReviewResult], config: dict[str, Any], history: dic
             tags.append(VERIFY_ELIGIBILITY_FLAG)
         closes = close_date(r.job)
         decision = decisions.get(number)
-        # A posting already applied to needs no deadline reminder.
+        # A posting with an application in progress needs no deadline reminder.
         if (closes is not None and 0 <= (closes - today).days <= window
-                and not (decision and decision["status"] == "applied")):
+                and not (decision and decision["status"] in ACTIVE_STATUSES)):
             tags.append("CLOSING SOON")
             closing_days[number] = (closes - today).days
-        if decision and decision["status"] != "not_interested":
+        if decision and decision["status"] not in HIDDEN_STATUSES:
             tags.append(decision["status"].upper())
         flags[number] = tags
 
@@ -354,3 +402,51 @@ def closes_in_text(days: int, closes: date) -> str:
     if days == 1:
         return "closes tomorrow"
     return f"closes {closes:%a %b} {closes.day}"
+
+
+def _days_since(value: str, today: date) -> int | None:
+    try:
+        return (today - date.fromisoformat(value)).days
+    except ValueError:
+        return None
+
+
+def decision_lines(decisions: dict[str, dict[str, str]], today: date, stale_days: int = STALE_DAYS) -> list[str]:
+    """``decide`` with no arguments: counts by status, then active applications with
+    days since applying and since the last update (marked when there's been none in
+    ``stale_days``), then everything else."""
+    if not decisions:
+        return []
+    counts = {status: 0 for status in ("applied", "interview", "offer", "rejected", "withdrawn",
+                                       "watching", "not_interested")}
+    for decision in decisions.values():
+        counts[decision["status"]] += 1
+    lines = [", ".join(f"{count} {status.replace('_', ' ')}" for status, count in counts.items() if count)]
+
+    def label(number: str, decision: dict[str, str]) -> str:
+        what = ", ".join(part for part in (decision.get("title", ""), decision.get("agency", "")) if part)
+        return f"{number:<12} {decision['status']:<15}" + (what or "(no title saved)")
+
+    active = [(n, d) for n, d in decisions.items() if d["status"] in ACTIVE_STATUSES]
+    # Longest wait first; unknown application dates last.
+    active.sort(key=lambda item: (item[1].get("applied_on") or "9999", item[0]))
+    if active:
+        lines += ["", "Active applications:"]
+    for number, decision in active:
+        applied = _days_since(decision.get("applied_on", ""), today)
+        updated = _days_since(decision.get("decided_on", ""), today)
+        facts = [f"applied {decision['applied_on']} ({applied} days ago)" if applied is not None
+                 else "applied date unknown (record it with --applied-on)"]
+        if updated is not None and decision.get("decided_on") != decision.get("applied_on"):
+            facts.append(f"last update {decision['decided_on']} ({updated} days ago)")
+        if updated is not None and updated >= stale_days:
+            facts.append(f"NO UPDATE IN {updated} DAYS")
+        if decision["note"]:
+            facts.append(decision["note"])
+        lines += [label(number, decision), " " * 13 + "; ".join(facts)]
+    others = [(n, d) for n, d in decisions.items() if d["status"] not in ACTIVE_STATUSES]
+    if others:
+        lines += ["", "Other decisions:"]
+    for number, decision in others:
+        lines.append(label(number, decision) + (f"  {decision['note']}" if decision["note"] else ""))
+    return lines

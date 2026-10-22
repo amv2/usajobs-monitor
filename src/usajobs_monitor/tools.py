@@ -174,7 +174,8 @@ def explain_match(settings: Settings, control_number: str) -> dict[str, Any]:
     if tier == "match":
         headline = "Passes every check."
     elif tier == "hidden":
-        headline = "You marked this not interested, so runs hide it."
+        status = str((decision or {}).get("status") or "not_interested").replace("_", " ")
+        headline = f"You marked this {status}, so runs hide it."
     elif tier == "watch_list":
         headline = f"On the {watch_list_label(settings.config)}: relevant, failing only the salary rule."
     elif tier == "near_miss":

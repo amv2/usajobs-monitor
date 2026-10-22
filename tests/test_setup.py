@@ -2,6 +2,7 @@
 
 import contextlib
 import csv
+from datetime import date
 import io
 import json
 import os
@@ -13,7 +14,7 @@ from unittest.mock import patch
 from usajobs_monitor import cli, profiles
 from usajobs_monitor.config import load_settings
 from usajobs_monitor.series import find_series
-from usajobs_monitor.tracking import load_decisions, save_decision
+from usajobs_monitor.tracking import decision_lines, load_decisions, normalize_status, save_decision
 from usajobs_monitor.wizard import Cancelled, Wizard, render_profile
 
 
@@ -218,8 +219,9 @@ class DecideTests(unittest.TestCase):
         code, out, err = self.cli("decide", "812345600", "not interested", "wrong", "series")
         self.assertEqual(code, 0, err)
         self.assertIn("Budget Analyst", out)
-        self.assertEqual(load_decisions(self.decisions)[0],
-                         {"812345600": {"status": "not_interested", "note": "wrong series"}})
+        decision = load_decisions(self.decisions)[0]["812345600"]
+        self.assertEqual((decision["status"], decision["note"]), ("not_interested", "wrong series"))
+        self.assertEqual((decision["title"], decision["agency"]), ("Budget Analyst", "Example Agency"))
         code, out, _ = self.cli("decide", "812345600", "applied")
         self.assertIn("was not_interested", out)
         code, out, _ = self.cli("decide")
@@ -241,9 +243,82 @@ class DecideTests(unittest.TestCase):
         save_decision(self.decisions, "222", "not-interested", "later")
         with self.decisions.open(newline="") as f:
             rows = list(csv.DictReader(f))
-        self.assertEqual(rows[0], {"control_number": "111", "status": "applied", "note": "first", "my_column": "keep me"})
+        self.assertEqual(rows[0], {"control_number": "111", "status": "applied", "note": "first", "my_column": "keep me",
+                                   "title": "", "agency": "", "applied_on": "", "decided_on": ""})
         self.assertEqual(rows[1]["status"], "not_interested")
         self.assertEqual(rows[1]["note"], "later")
+
+    def test_applied_date_survives_status_changes(self):
+        save_decision(self.decisions, "111", "applied", "sent", "Budget Analyst", today=date(2026, 9, 1),
+                      agency="Example Agency")
+        save_decision(self.decisions, "111", "interview", "panel 10/3", today=date(2026, 9, 20))
+        decision = load_decisions(self.decisions)[0]["111"]
+        self.assertEqual(decision["status"], "interview")
+        self.assertEqual(decision["applied_on"], "2026-09-01")
+        self.assertEqual(decision["decided_on"], "2026-09-20")
+        # Title and agency carry over when a later change can't look them up.
+        self.assertEqual((decision["title"], decision["agency"]), ("Budget Analyst", "Example Agency"))
+        save_decision(self.decisions, "111", "rejected", today=date(2026, 10, 1))
+        decision = load_decisions(self.decisions)[0]["111"]
+        self.assertEqual(decision["applied_on"], "2026-09-01")
+        self.assertEqual(decision["note"], "panel 10/3")  # no new note keeps the old one
+
+    def test_applied_date_for_older_files_and_backfill(self):
+        # Written before applied_on existed: decided_on is the day it was marked applied.
+        self.decisions.write_text("control_number,status,note,title,decided_on\n111,applied,,Analyst,2026-08-15\n"
+                                  "222,applied,,,not a date\n", encoding="utf-8")
+        decisions, warnings = load_decisions(self.decisions)
+        self.assertEqual(warnings, [])
+        self.assertEqual(decisions["111"]["applied_on"], "2026-08-15")
+        self.assertEqual(decisions["222"]["applied_on"], "")
+        save_decision(self.decisions, "111", "offer", today=date(2026, 10, 20))
+        self.assertEqual(load_decisions(self.decisions)[0]["111"]["applied_on"], "2026-08-15")
+        # Marking interview first leaves the application date unknown rather than guessing.
+        save_decision(self.decisions, "333", "interview", today=date(2026, 10, 20))
+        self.assertEqual(load_decisions(self.decisions)[0]["333"]["applied_on"], "")
+        save_decision(self.decisions, "333", "interview", today=date(2026, 10, 20), applied_on=date(2026, 9, 2))
+        self.assertEqual(load_decisions(self.decisions)[0]["333"]["applied_on"], "2026-09-02")
+
+    def test_new_statuses_and_aliases(self):
+        for alias, status in (("Interviewing", "interview"), ("offered", "offer"), ("not referred", "rejected"),
+                              ("not-selected", "rejected"), ("withdrew", "withdrawn")):
+            self.assertEqual(normalize_status(alias), status)
+        code, out, err = self.cli("decide", "812345600", "rejected")
+        self.assertEqual(code, 0, err)
+        self.assertIn("hidden from the next run", out)
+        code, _, err = self.cli("decide", "812345600", "applied", "--applied-on", "2026-10-02", "sent", "late")
+        self.assertEqual(code, 0, err)
+        decision = load_decisions(self.decisions)[0]["812345600"]
+        self.assertEqual((decision["applied_on"], decision["note"]), ("2026-10-02", "sent late"))
+        self.assertEqual(self.cli("decide", "812345600", "applied", "--applied-on", "10/2")[0], 2)
+
+    def test_list_shows_days_waiting_and_stale_applications(self):
+        self.decisions.write_text(
+            "control_number,status,note,title,agency,applied_on,decided_on\n"
+            "111,interview,panel,Budget Analyst,Example Agency,2026-08-01,2026-08-20\n"
+            "222,applied,,Program Analyst,,2026-10-01,2026-10-01\n"
+            "333,not_interested,wrong series,,,,2026-10-02\n"
+            "444,rejected,,Auditor,,2026-07-01,2026-09-01\n", encoding="utf-8")
+        lines = decision_lines(load_decisions(self.decisions)[0], date(2026, 10, 21))
+        text = "\n".join(lines)
+        self.assertEqual(lines[0], "1 applied, 1 interview, 1 rejected, 1 not interested")
+        self.assertIn("Active applications:", text)
+        self.assertLess(text.index("111"), text.index("222"))  # longest wait first
+        self.assertIn("applied 2026-08-01 (81 days ago); last update 2026-08-20 (62 days ago); "
+                      "NO UPDATE IN 62 DAYS; panel", text)
+        self.assertIn("applied 2026-10-01 (20 days ago)", text)
+        self.assertNotIn("NO UPDATE IN 20", text)
+        self.assertLess(text.index("Other decisions:"), text.index("333"))
+        self.assertIn("444", text.split("Other decisions:")[1])
+        code, out, _ = self.cli("decide")
+        self.assertEqual(code, 0)
+        self.assertIn("Active applications:", out)
+
+    def test_list_fills_missing_titles_from_history(self):
+        self.decisions.write_text("control_number,status,note\n812345600,not_interested,\n", encoding="utf-8")
+        code, out, _ = self.cli("decide")
+        self.assertEqual(code, 0)
+        self.assertIn("Budget Analyst, Example Agency", out)
 
 
 if __name__ == "__main__":
