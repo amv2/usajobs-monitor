@@ -597,6 +597,8 @@ Releases are cut as described in [docs/RELEASING.md](https://github.com/amv2/usa
 
 Please don't attach real configs, decisions files or reports to issues. Use the sample profile, or redact your copy first.
 
+Found a security problem? Please report it privately as described in [SECURITY.md](https://github.com/amv2/usajobs-monitor/blob/main/SECURITY.md), not in a public issue.
+
 ## License
 
 MIT, copyright 2026 amv2. See [LICENSE](https://github.com/amv2/usajobs-monitor/blob/main/LICENSE).
