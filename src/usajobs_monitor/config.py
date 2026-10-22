@@ -12,10 +12,12 @@ from __future__ import annotations
 
 import copy
 import datetime
+import ipaddress
 import json
 import os
 import re
 import shlex
+import urllib.parse
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping
@@ -82,7 +84,26 @@ AI_PRESETS: dict[str, dict[str, Any]] = {
                    "args": ["--approval-mode", "plan", "-p", "Answer the request above."]},
     "ollama": {"program": "ollama", "model_flag": "", "args": ["run", "{model}", "--format", "json"]},
 }
-AI_PROVIDERS = ("anthropic", "command", *AI_PRESETS)
+AI_PROVIDERS = ("anthropic", "openai", "command", *AI_PRESETS)
+# The "openai" provider speaks the OpenAI Chat Completions API, which many services
+# and local model servers offer. Known services, with the variable their key is
+# usually kept in. Any other https server needs USAJOBS_ALLOW_AI_PROVIDER, because
+# the profile picks where your resume and API key are sent.
+OPENAI_DEFAULT_URL = "https://api.openai.com/v1"
+OPENAI_KNOWN_HOSTS = {
+    "api.openai.com": "OPENAI_API_KEY",
+    "generativelanguage.googleapis.com": "GEMINI_API_KEY",
+    "openrouter.ai": "OPENROUTER_API_KEY",
+    "api.groq.com": "GROQ_API_KEY",
+    "api.mistral.ai": "MISTRAL_API_KEY",
+    "api.deepseek.com": "DEEPSEEK_API_KEY",
+    "api.x.ai": "XAI_API_KEY",
+    "api.together.xyz": "TOGETHER_API_KEY",
+}
+# Servers on this computer (LM Studio, Ollama, vLLM, llama.cpp). Plain http is
+# allowed only for these; host.docker.internal is this computer seen from Docker.
+OPENAI_LOCAL_HOSTS = ("localhost", "host.docker.internal")
+OPENAI_FORMATS = ("json_schema", "json_object", "none")
 # A model name, never something a tool could read as a flag.
 AI_MODEL_NAME = r"[A-Za-z0-9][\w.:/@-]{0,99}"
 AI_PROVIDER_PATH = r"[A-Za-z_][\w.]*:[A-Za-z_]\w*"  # or "package.module:factory"
@@ -522,7 +543,8 @@ def _check_ai(check: _Checker, config: dict[str, Any]) -> None:
                     + str(ai.get("api_key_env") or DEFAULT_AI_KEY_ENV))
         del ai["api_key"]
     check.unknown(ai, path, {"provider", "model", "effort", "api_key_env", "command", "resume", "send_resume",
-                             "fit_notes", "rank", "lists", "max_jobs", "timeout_seconds"})
+                             "fit_notes", "rank", "lists", "max_jobs", "timeout_seconds", "base_url",
+                             "response_format"})
     check.string(ai, "provider", path, "anthropic")
     provider = ai.get("provider")
     if isinstance(provider, str) and provider not in AI_PROVIDERS and not re.fullmatch(AI_PROVIDER_PATH, provider):
@@ -531,6 +553,10 @@ def _check_ai(check: _Checker, config: dict[str, Any]) -> None:
     # The Claude API needs a model; the command-line tools use their own default unless one is set.
     check.string(ai, "model", path, DEFAULT_AI_MODEL if provider == "anthropic" else "")
     model = ai.get("model")
+    if provider == "openai" and isinstance(model, str) and not re.fullmatch(AI_MODEL_NAME, model):
+        check.error("ai.model", 'required with provider = "openai": the model name the server knows, for example '
+                    '"gpt-5", "gemini-2.5-flash" or "qwen3-8b"' if not model else
+                    "expected a model name such as gpt-5 or llama3.1")
     if provider in AI_PRESETS and isinstance(model, str):
         if not model and not AI_PRESETS[provider]["model_flag"]:
             check.error("ai.model", f'required with provider = "{provider}": the model to run, for example "llama3.1"')
@@ -539,9 +565,17 @@ def _check_ai(check: _Checker, config: dict[str, Any]) -> None:
     if provider in AI_PRESETS and ai.get("command"):
         check.error("ai.command", f'not used with provider = "{provider}"; use provider = "command" to run your own '
                     "command line")
-    check.string(ai, "effort", path, "medium", choices=AI_EFFORTS)
-    check.string(ai, "api_key_env", path, DEFAULT_AI_KEY_ENV)
-    if isinstance(ai.get("api_key_env"), str) and not re.fullmatch(ENV_NAME, ai["api_key_env"]):
+    if provider == "openai":
+        _check_openai(check, ai)
+    else:
+        for key in ("base_url", "response_format"):
+            if ai.get(key):
+                check.error(f"ai.{key}", 'only used with provider = "openai"')
+        check.string(ai, "base_url", path, "")
+        check.string(ai, "response_format", path, "")
+        check.string(ai, "effort", path, "medium", choices=AI_EFFORTS)
+        check.string(ai, "api_key_env", path, DEFAULT_AI_KEY_ENV)
+    if isinstance(ai.get("api_key_env"), str) and ai["api_key_env"] and not re.fullmatch(ENV_NAME, ai["api_key_env"]):
         check.error("ai.api_key_env", "expected an environment variable name like ANTHROPIC_API_KEY")
     check.strings(ai, "command", path, [])
     if provider == "command" and not ai.get("command"):
@@ -559,7 +593,7 @@ def _check_ai(check: _Checker, config: dict[str, Any]) -> None:
         value = ai.get(key)
         if isinstance(value, int) and not isinstance(value, bool) and not low <= value <= high:
             check.error(f"ai.{key}", f"expected {low} to {high}")
-    if isinstance(provider, str) and provider != "anthropic" and not ai_provider_allowed(ai, os.environ):
+    if isinstance(provider, str) and ai_provider_allowance(ai) and not ai_provider_allowed(ai, os.environ):
         check.warnings.append(ai_provider_hint(ai) + "; until then runs skip fit notes and the fit command refuses")
     if provider == "command":
         check.warnings += claude_command_warnings([str(part) for part in ai.get("command") or []])
@@ -568,6 +602,57 @@ def _check_ai(check: _Checker, config: dict[str, Any]) -> None:
                               "AI provider; runs skip fit notes until then")
     if ai.get("rank") is True and ai.get("fit_notes") is not True:
         check.warnings.append("ai.rank: needs ai.fit_notes = true; lists keep their usual order until then")
+
+
+def _check_openai(check: _Checker, ai: dict[str, Any]) -> None:
+    """``base_url``, key and output format for the OpenAI-compatible provider."""
+    check.string(ai, "base_url", "ai", OPENAI_DEFAULT_URL)
+    host = ""
+    if isinstance(ai.get("base_url"), str):
+        ai["base_url"] = ai["base_url"].strip().rstrip("/")
+        problem = openai_url_problem(ai["base_url"])
+        if problem:
+            check.error("ai.base_url", problem)
+        else:
+            host = openai_host(ai["base_url"])
+    check.string(ai, "response_format", "ai", "json_schema", choices=OPENAI_FORMATS)
+    # Sent as reasoning_effort only when set: models without reasoning reject it.
+    check.string(ai, "effort", "ai", "", choices=AI_EFFORTS)
+    check.string(ai, "api_key_env", "ai", OPENAI_KNOWN_HOSTS.get(host, ""))
+    if host and not ai.get("api_key_env") and not openai_is_local(host):
+        check.error("ai.api_key_env", f"required with base_url on {host}: the environment variable (or keychain "
+                    "entry) that holds its API key")
+
+
+def openai_host(url: str) -> str:
+    return (urllib.parse.urlsplit(url).hostname or "").lower()
+
+
+def openai_is_local(host: str) -> bool:
+    if host in OPENAI_LOCAL_HOSTS or host.endswith(".localhost"):
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+def openai_url_problem(url: str) -> str:
+    """Why ``url`` can't be ``ai.base_url``, or "" when it can."""
+    try:
+        parts = urllib.parse.urlsplit(url)
+        parts.port  # noqa: B018 - raises on a bad port
+    except ValueError:
+        return "expected a URL such as https://api.openai.com/v1"
+    host = (parts.hostname or "").lower()
+    if parts.scheme not in ("https", "http") or not host:
+        return "expected a URL such as https://api.openai.com/v1"
+    if parts.username or parts.password or parts.query or parts.fragment:
+        return "expected a plain URL with no user name, password, ?query or #fragment; the key comes from api_key_env"
+    if parts.scheme == "http" and not openai_is_local(host):
+        return ("plain http is only allowed for a server on this computer (localhost); use https, which keeps "
+                "your resume and API key private on the way")
+    return ""
 
 
 CLAUDE_SAFE_FLAGS = ("--tools", "--strict-mcp-config", "--no-session-persistence")
@@ -604,10 +689,17 @@ def ai_preset_command(ai: Mapping[str, Any]) -> list[str]:
 
 def ai_provider_allowance(ai: Mapping[str, Any]) -> str:
     """The value ``USAJOBS_ALLOW_AI_PROVIDER`` must list before this provider runs, or ""
-    for the built-in ``anthropic`` provider, which runs no local code."""
+    for the built-in ``anthropic`` provider, which runs no local code, and for
+    ``openai`` with a known service or a server on this computer."""
     provider = str(ai.get("provider") or "anthropic")
     if provider == "anthropic":
         return ""
+    if provider == "openai":
+        # Runs nothing here, but the profile picks the server, so an unknown one
+        # must be allowed before it gets your resume and API key.
+        url = str(ai.get("base_url") or OPENAI_DEFAULT_URL).rstrip("/")
+        host = openai_host(url)
+        return "" if host in OPENAI_KNOWN_HOSTS or openai_is_local(host) else url
     if provider == "command":
         # The whole command line, not just the program: allowing "python3" for one
         # setup must not let another profile run "python3 -c ...".
@@ -629,7 +721,9 @@ def ai_provider_allowed(ai: Mapping[str, Any], env: Mapping[str, str]) -> bool:
 def ai_provider_hint(ai: Mapping[str, Any]) -> str:
     needed = ai_provider_allowance(ai)
     provider = ai.get("provider")
-    if provider in AI_PRESETS:
+    if provider == "openai":
+        what = f"send your resume and API key to {openai_host(needed)}, which is not a known AI service"
+    elif provider in AI_PRESETS:
         what = f"run {AI_PRESETS[str(provider)]['program']}, an AI tool on this computer"
     else:
         what = f"run {needed}" if provider == "command" else f"import and call {needed}"

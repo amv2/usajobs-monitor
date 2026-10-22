@@ -19,7 +19,8 @@ There are two ways to connect AI, and you can use both:
 | A ChatGPT Plus, Pro or Business plan | [3. OpenAI Codex CLI](#3-chatgpt-through-the-openai-codex-cli) | Included in your plan | OpenAI, under your plan's terms |
 | A Google account | [4. Gemini CLI](#4-gemini-cli) | Free tier, or your Google AI plan | Google, under the Gemini CLI terms |
 | A fast computer and want nothing to leave it | [5. Local model with Ollama](#5-local-model-with-ollama) | Free | Nowhere: it stays on your computer |
-| An API key (pay per use) | [6. API key](#6-api-key-pay-per-use) | Per use, usually a few cents a run | The API provider |
+| An API key (pay per use): Claude, OpenAI, Gemini, OpenRouter and others | [6. API key](#6-api-key-pay-per-use) | Per use, usually a few cents a run | The API provider |
+| LM Studio or another local model server | [6. API key](#local-model-servers-lm-studio-ollama-vllm), no key needed | Free | Nowhere: it stays on your computer |
 | Something else | [7. Any other program or model](#7-any-other-program-or-model) | Depends | Depends |
 
 A **subscription** is the monthly plan you sign in to the app with. An **API key** is a separate, pay-per-use account for developers. Most people already have a subscription, so options 1 to 4 need no API key. A ChatGPT or Claude subscription does not include API access.
@@ -43,7 +44,7 @@ A **subscription** is the monthly plan you sign in to the app with. An **API key
    provider    = "claude-cli"   # see below
    ```
 
-3. **Allow the provider on this computer.** Options 2 to 5 and 7 run a program on your computer. A profile can't do that by itself, so a profile someone shares with you can't start a program just because you ran it. You allow it once, outside the profile, by setting `USAJOBS_ALLOW_AI_PROVIDER` to the provider's name:
+3. **Allow the provider on this computer.** Options 2 to 5 and 7 run a program on your computer (option 6 doesn't, so skip this step for it). A profile can't do that by itself, so a profile someone shares with you can't start a program just because you ran it. You allow it once, outside the profile, by setting `USAJOBS_ALLOW_AI_PROVIDER` to the provider's name:
 
    ```bash
    export USAJOBS_ALLOW_AI_PROVIDER=claude-cli
@@ -192,7 +193,7 @@ Then ask, for example: "Use usajobs to search my profile, then compare the match
 
 3. Allow it with `export USAJOBS_ALLOW_AI_PROVIDER=ollama`.
 
-**Good to know:** notes are usually weaker than from the hosted models above, so treat the fit level as a rough hint. LM Studio and other local runners work through [option 7](#7-any-other-program-or-model).
+**Good to know:** notes are usually weaker than from the hosted models above, so treat the fit level as a rough hint. LM Studio, and Ollama without the command line, work through the [built-in `openai` provider](#local-model-servers-lm-studio-ollama-vllm).
 
 ## 6. API key (pay per use)
 
@@ -211,20 +212,52 @@ provider = "anthropic"          # the default
 
 No `USAJOBS_ALLOW_AI_PROVIDER` is needed, because nothing runs on your computer. With several resumes, they're cached after the first posting of a run, so later postings cost less. Your data is covered by your API account's [commercial terms](https://www.anthropic.com/legal/commercial-terms).
 
-**OpenAI, Gemini, OpenRouter and other API keys.** There's no built-in provider for these yet. Until there is, use the [`llm`](https://llm.datasette.io) command-line tool through option 7. It supports most providers with plugins:
+### OpenAI, Gemini, OpenRouter and other API keys (built in)
+
+`provider = "openai"` works with any service that offers the OpenAI Chat Completions API, which most do. It needs no extra package and runs no program on your computer. Store the key, then point `base_url` at the service:
 
 ```bash
-pip install llm llm-gemini
-llm keys set openai        # or: llm keys set gemini
+usajobs-monitor credentials set OPENAI_API_KEY   # or export OPENAI_API_KEY=...
 ```
 
 ```toml
 [ai]
-provider = "command"
-command  = ["llm", "-m", "gpt-5"]   # or "gemini-2.5-pro", etc.
+provider = "openai"
+model    = "gpt-5"                       # required: a model name the service knows
+# base_url = "https://api.openai.com/v1" # the default
 ```
 
-Then `export USAJOBS_ALLOW_AI_PROVIDER='llm -m gpt-5'`.
+| Service | `base_url` | Key variable (default) | Example `model` |
+|---|---|---|---|
+| OpenAI | `https://api.openai.com/v1` (default) | `OPENAI_API_KEY` | `gpt-5` |
+| Google Gemini | `https://generativelanguage.googleapis.com/v1beta/openai` | `GEMINI_API_KEY` | `gemini-2.5-flash` |
+| OpenRouter (many models, one key) | `https://openrouter.ai/api/v1` | `OPENROUTER_API_KEY` | `openai/gpt-5` |
+| Groq | `https://api.groq.com/openai/v1` | `GROQ_API_KEY` | see the service's model list |
+| Mistral | `https://api.mistral.ai/v1` | `MISTRAL_API_KEY` | `mistral-large-latest` |
+| DeepSeek | `https://api.deepseek.com/v1` | `DEEPSEEK_API_KEY` | `deepseek-chat` (set `response_format = "json_object"`) |
+| xAI | `https://api.x.ai/v1` | `XAI_API_KEY` | `grok-4` |
+| Together | `https://api.together.xyz/v1` | `TOGETHER_API_KEY` | see the service's model list |
+
+The key comes from the variable in the table, or from `api_key_env` if you set one. Model names change often, so check the service's own list. Each service's terms cover what you send.
+
+- **JSON output.** The tool asks the model to fill in a fixed JSON schema (`response_format = "json_schema"`, the default). If the service or model can't do that, the run summary says the request was turned down: set `response_format = "json_object"` (plain JSON) or `"none"` (the schema goes in the prompt instead).
+- **Effort.** `effort` is sent as `reasoning_effort` only when you set it (`low`, `medium` or `high` for most reasoning models). Leave it out for models without a reasoning setting, which reject it.
+- **Cost.** Your resume comes first in every prompt, so services with automatic prompt caching (OpenAI, Gemini, DeepSeek and others) charge less for it after the first posting of a run.
+- **Other services.** Any other `https` address works too, with `api_key_env` naming its key variable. Because the profile picks where your resume and key go, an address that isn't in the table (or on your computer) must also be allowed outside the profile, like a program: `export USAJOBS_ALLOW_AI_PROVIDER=https://llm.example.com/v1`. `check-config` prints the value.
+
+### Local model servers (LM Studio, Ollama, vLLM)
+
+Most local model servers speak the same API, so the same provider works with nothing leaving your computer. No key and no `USAJOBS_ALLOW_AI_PROVIDER` are needed for a server on `localhost`:
+
+```toml
+[ai]
+provider = "openai"
+base_url = "http://localhost:1234/v1"   # LM Studio; Ollama is http://localhost:11434/v1
+model    = "qwen3-8b"                   # the model name the server shows
+timeout_seconds = 600                   # local models can be slow
+```
+
+Start the server first (in LM Studio, the Developer tab; Ollama runs on its own). Plain `http` is allowed only for `localhost`, `127.0.0.1` and, from inside Docker, `host.docker.internal`. A model server on another computer needs `https`. If a small model's answers don't parse, try `response_format = "json_object"` or a larger model.
 
 ## 7. Any other program or model
 
@@ -246,7 +279,8 @@ Allow the whole command line, exactly: `export USAJOBS_ALLOW_AI_PROVIDER='my-mod
 
 - Your resume is read on your computer. It's sent only when `send_resume = true`, only with postings from your own search, and only to the provider you picked.
 - The posting and your resume go to the model as data, with instructions to ignore any instructions inside them. The Claude CLI option runs with every tool off; Codex and Gemini run read-only.
-- A shared profile can't turn on a program-based provider by itself: you have to allow it with `USAJOBS_ALLOW_AI_PROVIDER`. Read any shared profile's `[ai]` table before you do.
+- A shared profile can't turn on a program-based provider by itself, or send your resume and key to an unknown `base_url`: you have to allow it with `USAJOBS_ALLOW_AI_PROVIDER`. Read any shared profile's `[ai]` table before you do.
+- With `openai`, your key is sent only to `base_url`, over `https` (plain `http` only to a server on your computer), and redirects are never followed.
 - Fit notes are written by a model. Fit levels are hints and can change between runs. Read the announcement before you rely on them. The AI judges minimum qualifications from your resume, not how the assessment questionnaire will place you.
 
 ## If something goes wrong
@@ -257,4 +291,8 @@ Allow the whole command line, exactly: `export USAJOBS_ALLOW_AI_PROVIDER='my-mod
 | `the claude program was not found` | Install the CLI, or add its folder to `PATH` in `~/.usajobs_env`. |
 | `ai.provider claude-cli exited with status 1` | Run `claude` once in a terminal to check you're signed in and within your usage limits. Same for `codex` and `gemini`. |
 | `the AI provider did not answer with a JSON object` | The model didn't follow the format. With Ollama, try a larger model. |
+| `api.openai.com rejected the API key` (or another server's name) | Check the key with `usajobs-monitor credentials status`, and that `api_key_env` names the right variable. |
+| `... does not know ai.model, or ai.base_url is wrong` | Check the model name against the service's list, and that `base_url` ends the way the table above shows (usually `/v1`). |
+| `... turned the request down (HTTP 400)` | The model may not do JSON schema output: set `response_format = "json_object"` or `"none"`. If you set `effort`, try without it. |
+| `could not reach localhost; check ai.base_url and that the model server is running` | Start LM Studio's server (or Ollama), and check the port in `base_url`. |
 | `needs ai.send_resume = true` | Add `send_resume = true` to `[ai]` once you're comfortable sending your resume to the provider. |

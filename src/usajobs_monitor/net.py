@@ -16,8 +16,11 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
         return None  # a redirect is reported as an HTTP error, never followed
 
 
-def open_url(request: urllib.request.Request, timeout: float):
-    """Open with certificate checks and no redirects. Honors HTTPS_PROXY."""
-    opener = urllib.request.build_opener(NoRedirect(),
-                                         urllib.request.HTTPSHandler(context=ssl.create_default_context()))
-    return opener.open(request, timeout=timeout)
+def open_url(request: urllib.request.Request, timeout: float, use_proxy: bool = True):
+    """Open with certificate checks and no redirects. Honors HTTPS_PROXY unless
+    ``use_proxy`` is false, for a server on this computer."""
+    handlers: list[urllib.request.BaseHandler] = [
+        NoRedirect(), urllib.request.HTTPSHandler(context=ssl.create_default_context())]
+    if not use_proxy:
+        handlers.append(urllib.request.ProxyHandler({}))
+    return urllib.request.build_opener(*handlers).open(request, timeout=timeout)

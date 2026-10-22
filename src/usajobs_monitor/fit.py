@@ -9,6 +9,10 @@ Providers are swappable (``ai.provider``):
 * ``"anthropic"`` (default): the Claude API through the ``anthropic`` package
   from the ``ai`` extra. The key comes from ``ANTHROPIC_API_KEY`` (or
   ``ai.api_key_env``) in the environment or the OS keychain.
+* ``"openai"``: any service or local server that speaks the OpenAI Chat
+  Completions API (OpenAI, Gemini, OpenRouter, LM Studio, Ollama and others),
+  at ``ai.base_url``, over the standard library. The key comes from
+  ``ai.api_key_env`` in the environment or the OS keychain.
 * ``"claude-cli"``, ``"codex-cli"``, ``"gemini-cli"``, ``"ollama"``: an AI
   command-line tool you already have, run with ready-made flags (see
   ``AI_PRESETS`` in config.py). They use that tool's own sign-in.
@@ -17,10 +21,11 @@ Providers are swappable (``ai.provider``):
 * ``"package.module:factory"``: your own Python provider. ``factory(ai_config,
   env)`` returns an object with ``complete(system, prompt) -> str``.
 
-All but ``anthropic`` run code on this computer, so a profile alone can't turn
-them on: ``USAJOBS_ALLOW_AI_PROVIDER`` in the environment must also list the
-tool's name, the exact command line, or the factory path. A shared profile stays
-data. docs/AI.md compares the options.
+All but ``anthropic`` and ``openai`` run code on this computer, so a profile
+alone can't turn them on: ``USAJOBS_ALLOW_AI_PROVIDER`` in the environment must
+also list the tool's name, the exact command line, or the factory path. The same
+goes for an ``openai`` server that isn't a known service or on this computer,
+since it would get your resume and key. A shared profile stays data. docs/AI.md compares the options.
 
 Every provider answers with the JSON object in ``FIT_SCHEMA``. Notes are cached
 by posting, resume and model, so a scheduled run pays only for new postings.
@@ -32,7 +37,11 @@ import hashlib
 import importlib
 import json
 import re
+import socket
 import subprocess
+import time
+import urllib.error
+import urllib.request
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Any, Mapping, Protocol
@@ -48,7 +57,15 @@ from .jobs import (
     pay_plan_display,
     salary_display,
 )
-from .config import AI_PRESETS, ai_preset_command, ai_provider_allowed, ai_provider_hint
+from .config import (
+    AI_PRESETS,
+    ai_preset_command,
+    ai_provider_allowed,
+    ai_provider_hint,
+    openai_host,
+    openai_is_local,
+)
+from .net import open_url
 from .resume_text import MAX_RESUMES, ResumeError, pick_resumes, read_resumes, resume_names
 from .review import ReviewResult
 from .tracking import FIT_LABELS, FIT_RANK
@@ -201,6 +218,116 @@ class AnthropicProvider:
         return "".join(block.text for block in response.content if getattr(block, "type", "") == "text")
 
 
+def schema_instructions() -> str:
+    """For providers that can't be held to FIT_SCHEMA: the schema, in the prompt."""
+    return f"Answer with only a JSON object that matches this JSON Schema:\n{json.dumps(FIT_SCHEMA)}"
+
+
+class OpenAIProvider:
+    """The OpenAI Chat Completions API at ``base_url``, which OpenAI and many other
+    services and local model servers speak. Standard library only: requests go
+    through ``net.open_url`` (certificate checks, no redirects)."""
+
+    MAX_RESPONSE_BYTES = 4_000_000
+    RETRY_STATUSES = {429, 500, 502, 503, 504}
+    RETRY_WAITS = (2.0, 8.0)
+
+    def __init__(self, base_url: str, api_key: str, model: str, effort: str, response_format: str,
+                 timeout: float) -> None:
+        self.url = base_url.rstrip("/") + "/chat/completions"
+        self.host = openai_host(base_url)
+        self.local = openai_is_local(self.host)
+        self.api_key = api_key
+        self.model = model
+        self.effort = effort
+        self.response_format = response_format
+        self.timeout = timeout
+        self.label = f"openai {model} at {self.host}"
+        self.sleep = time.sleep
+
+    def request_body(self, system: str, prompt: str) -> dict[str, Any]:
+        if self.response_format != "json_schema":
+            prompt = f"{schema_instructions()}\n\n{prompt}"
+        body: dict[str, Any] = {"model": self.model,
+                                "messages": [{"role": "system", "content": system},
+                                             {"role": "user", "content": prompt}]}
+        if self.response_format == "json_schema":
+            body["response_format"] = {"type": "json_schema",
+                                       "json_schema": {"name": "fit_note", "strict": True, "schema": FIT_SCHEMA}}
+        elif self.response_format == "json_object":
+            body["response_format"] = {"type": "json_object"}
+        if self.effort:
+            body["reasoning_effort"] = self.effort
+        return body
+
+    def complete(self, system: str, prompt: str) -> str:
+        data = json.dumps(self.request_body(system, prompt)).encode()
+        headers = {"Content-Type": "application/json", "Accept": "application/json",
+                   "User-Agent": "usajobs-monitor"}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+        for attempt in range(len(self.RETRY_WAITS) + 1):
+            request = urllib.request.Request(self.url, data=data, headers=headers, method="POST")
+            try:
+                with open_url(request, self.timeout, use_proxy=not self.local) as response:
+                    raw = response.read(self.MAX_RESPONSE_BYTES + 1)
+                break
+            except urllib.error.HTTPError as exc:
+                exc.close()
+                if exc.code in self.RETRY_STATUSES and attempt < len(self.RETRY_WAITS):
+                    self.sleep(self.RETRY_WAITS[attempt])
+                    continue
+                raise self._http_error(exc.code) from None
+            except (TimeoutError, socket.timeout):
+                raise FitError(f"{self.host} took longer than {self.timeout:g} seconds") from None
+            except (urllib.error.URLError, OSError):
+                raise FitError(f"could not reach {self.host}; check ai.base_url"
+                               + (" and that the model server is running" if self.local else ""), fatal=True) from None
+        if len(raw) > self.MAX_RESPONSE_BYTES:
+            raise FitError(f"{self.host} sent a larger answer than expected")
+        return self._answer_text(raw)
+
+    def _http_error(self, status: int) -> FitError:
+        if status == 401:
+            return FitError(f"{self.host} rejected the API key", fatal=True)
+        if status == 403:
+            return FitError(f"{self.host} refused the request; check the key may use ai.model", fatal=True)
+        if status == 404:
+            return FitError(f"{self.host} does not know ai.model, or ai.base_url is wrong (it usually ends in /v1)",
+                            fatal=True)
+        if status == 429:
+            return FitError(f"{self.host} is rate limiting this key, or its credit ran out; try again later")
+        if status in (400, 422):
+            hint = ("; if the model or server can't do JSON schema output, set ai.response_format = \"json_object\" "
+                    "or \"none\"" if self.response_format == "json_schema" else "")
+            if self.effort:
+                hint += "; if the model has no reasoning setting, remove ai.effort"
+            return FitError(f"{self.host} turned the request down (HTTP {status}){hint}", fatal=True)
+        if 300 <= status < 400:
+            return FitError(f"{self.host} answered with a redirect, which is not followed; check ai.base_url",
+                            fatal=True)
+        return FitError(f"{self.host} returned HTTP {status}")
+
+    def _answer_text(self, raw: bytes) -> str:
+        try:
+            choice = json.loads(raw)["choices"][0]
+            message = choice["message"]
+        except (ValueError, KeyError, IndexError, TypeError):
+            raise FitError(f"{self.host} did not answer in the Chat Completions format") from None
+        if not isinstance(message, dict):
+            raise FitError(f"{self.host} did not answer in the Chat Completions format")
+        if message.get("refusal"):
+            raise FitError("the model declined to review this posting")
+        if choice.get("finish_reason") == "length":
+            raise FitError("the model's answer was cut off")
+        content = message.get("content")
+        if isinstance(content, list):  # some servers send content parts
+            content = "".join(str(part.get("text") or "") for part in content if isinstance(part, dict))
+        if not isinstance(content, str) or not content.strip():
+            raise FitError("the model sent an empty answer")
+        return content
+
+
 class CommandProvider:
     """A local program: the prompt on standard input, the answer on standard output."""
 
@@ -212,8 +339,7 @@ class CommandProvider:
         self.name = "ai.command" if not label else f"ai.provider {label.split()[0]}"
 
     def complete(self, system: str, prompt: str) -> str:
-        text = (f"{system}\n\nAnswer with only a JSON object that matches this JSON Schema:\n"
-                f"{json.dumps(FIT_SCHEMA)}\n\n{prompt}")
+        text = f"{system}\n\n{schema_instructions()}\n\n{prompt}"
         try:
             done = subprocess.run(self.command, input=text, capture_output=True, text=True, timeout=self.timeout,
                                   check=False)
@@ -240,6 +366,15 @@ def make_provider(ai: Mapping[str, Any], env: Mapping[str, str] | None = None) -
         if not key:
             raise FitError(f"set the {key_env} environment variable" + keychain.missing_hint(env, key_env))
         return AnthropicProvider(key, ai["model"], ai["effort"], timeout)
+    if name == "openai":
+        key_env = str(ai.get("api_key_env") or "")
+        key = str(env.get(key_env) or "").strip() if key_env else ""
+        local = openai_is_local(openai_host(ai["base_url"]))
+        if not key and not local:
+            raise FitError(f"set the {key_env or 'ai.api_key_env'} environment variable"
+                           + (keychain.missing_hint(env, key_env) if key_env else ""), fatal=True)
+        return OpenAIProvider(ai["base_url"], key, ai["model"], ai.get("effort") or "",
+                              ai.get("response_format") or "json_schema", timeout)
     if name == "command":
         return CommandProvider(ai["command"], timeout)
     if name in AI_PRESETS:

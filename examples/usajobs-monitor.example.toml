@@ -137,6 +137,10 @@ formats = ["html", "csv"]   # also "docx" (Word briefing) and "xlsx" (Excel trac
 # provider = "ollama"         # local model, nothing leaves your computer
 # model    = "llama3.1"       #   (ollama needs a model; the others have defaults)
 # provider = "anthropic"      # Claude API key in ANTHROPIC_API_KEY (pay per use)
+# provider = "openai"         # OpenAI-compatible API: OpenAI key in OPENAI_API_KEY,
+# model    = "gpt-5"          #   or Gemini, OpenRouter, LM Studio... with base_url:
+# base_url = "https://generativelanguage.googleapis.com/v1beta/openai"   (GEMINI_API_KEY)
+# base_url = "http://localhost:1234/v1"                                  (LM Studio, no key)
 #
-# All but "anthropic" also need, outside this file:
+# All but "anthropic" and "openai" also need, outside this file:
 #   export USAJOBS_ALLOW_AI_PROVIDER=claude-cli   (the provider's name)
