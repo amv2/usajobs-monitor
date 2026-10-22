@@ -29,6 +29,9 @@ from .review import contains_term
 # The best version must score this much above the next one, else the AI compares them all.
 CLEAR_LEAD = 1.15
 TITLE_WEIGHT = 3
+# The parts of a posting that say what experience it wants (QualificationSummary is on
+# the posting itself, the rest under its details).
+POSTING_FIELDS = ("QualificationSummary", "MajorDuties", "Requirements", "KeyRequirements", "Education")
 SERIES = re.compile(r"\d{4}")
 WORD = re.compile(r"[a-z][a-z0-9]{2,}")
 STOP_WORDS = frozenset("""
@@ -83,16 +86,21 @@ class ResumeSet:
                     return index, f"your rule: series {term}"
             elif contains_term(title, term):
                 return index, f'your rule: "{term}" in the title'
-        wanted = posting_words(job)
-        scores = []
-        for vocabulary in self._words:
-            total = sum(self._weights.get(word, 0.0) * weight for word, weight in wanted.items() if word in vocabulary)
-            scores.append(total / math.sqrt(max(len(vocabulary), 1)))
+        scores = self.scores(job)
         ranked = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)
         best, runner_up = scores[ranked[0]], scores[ranked[1]]
         if best <= 0 or best < runner_up * CLEAR_LEAD:
             return None, ""
         return ranked[0], "closest wording to the posting"
+
+    def scores(self, job: Mapping[str, Any]) -> list[float]:
+        """How well each version's distinctive words cover the posting, in version order."""
+        wanted = posting_words(job)
+        scores = []
+        for vocabulary in self._words:
+            total = sum(self._weights.get(word, 0.0) * weight for word, weight in wanted.items() if word in vocabulary)
+            scores.append(total / math.sqrt(max(len(vocabulary), 1)))
+        return scores
 
 
 @dataclass(frozen=True)
@@ -112,9 +120,8 @@ def posting_words(job: Mapping[str, Any]) -> dict[str, int]:
     text is left out: it's the same boilerplate in every posting."""
     detail = details(dict(job))
     wanted: dict[str, int] = {}
-    for value in (job.get("QualificationSummary"), detail.get("MajorDuties"), detail.get("Requirements"),
-                  detail.get("KeyRequirements"), detail.get("Education")):
-        for word in words(as_text(value)):
+    for name in POSTING_FIELDS:
+        for word in words(as_text(job.get(name) or detail.get(name))):
             wanted[word] = 1
     for word in words(as_text(job.get("PositionTitle"))):
         wanted[word] = TITLE_WEIGHT
