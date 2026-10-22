@@ -81,7 +81,7 @@ class ToolTests(unittest.TestCase):
     def test_screen_eligibility(self):
         with self.fetch(job("5")) as fetch:
             out = tools.screen_eligibility(self.settings, "5")
-        self.assertEqual(fetch.call_args.args[0], {"Keyword": "5"})
+        self.assertEqual(fetch.call_args.args[0], {"Keyword": "5", "ResultsPerPage": 500})
         self.assertEqual((out["verdict"], out["eligibility_basis"]), ("route_found", "Open to the public"))
         with self.fetch(job("6", paths=("fed-competitive",))):
             out = tools.screen_eligibility(self.settings, "6")
