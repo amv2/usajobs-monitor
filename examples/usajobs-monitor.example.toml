@@ -91,6 +91,7 @@ additional_hiring_paths = []              # e.g. ["vet", "mspouse", "fed-transit
 [report]
 title = "USAJOBS Job Monitor"
 formats = ["html", "csv"]   # also "docx" (Word briefing) and "xlsx" (Excel tracker); default ["docx", "xlsx"]
+# closing_soon_days = 3      # flag jobs closing within this many days; use your longest gap between runs plus 1-2
 
 # Optional: tune ranking. These are the defaults.
 # [scoring]
