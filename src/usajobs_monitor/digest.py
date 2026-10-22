@@ -16,7 +16,6 @@ from datetime import date, datetime
 from email import policy
 from email.message import EmailMessage
 from email.utils import format_datetime
-from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
 from .config import CLOSING_SOON_DAYS

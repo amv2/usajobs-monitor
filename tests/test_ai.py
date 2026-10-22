@@ -13,7 +13,7 @@ import unittest
 from unittest import mock
 
 from usajobs_monitor import fit, resume_text
-from usajobs_monitor.config import ConfigError, Settings, load_settings, validate_config
+from usajobs_monitor.config import ConfigError, load_settings, validate_config
 from usajobs_monitor.fit import FitError
 from usajobs_monitor.review import review_job
 from usajobs_monitor.tracking import build_view

@@ -26,3 +26,9 @@ For the maintainer. `.github/workflows/release.yml` builds the package, runs the
 An upload can't be replaced. If a release is broken, yank it on PyPI and publish a new version.
 
 New GS pay tables reach PyPI users only through a release, so plan one each January once the new tables are bundled (see "Adding a year" in [CONFIG_REFERENCE.md](CONFIG_REFERENCE.md)).
+
+## Weekly checks
+
+The tests workflow also runs every Monday against the latest dependencies and runs `pip-audit` on them. GitHub emails you when a scheduled run fails. A failed audit doesn't block pull requests; fix it by raising a lower bound in `pyproject.toml` or waiting for an upstream fix, then release.
+
+GitHub turns scheduled workflows off in a public repository after 60 days with no activity, without notice. If the repository has been quiet, check *Actions → tests* and choose *Enable workflow* if it's off. Releasing at least each January (above) keeps it active.
