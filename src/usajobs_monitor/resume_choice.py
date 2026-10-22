@@ -9,8 +9,8 @@ rules and word counting, so the same posting and files always give the same pick
    4-digit term matches the posting's job series ("0501"), any other term a whole
    word or phrase in its title ("budget", "financ*").
 2. Otherwise, the version whose distinctive words (the ones the other versions
-   don't share) best cover the posting's title, qualifications and duties.
-3. When no version clearly wins, the posting goes with every version, as with
+   don't share) best cover the posting's title and qualifications.
+3. When no version clearly wins (this is deliberately strict), the posting goes with every version, as with
    ``resume_choice = "all"``, and the AI picks.
 """
 
@@ -26,14 +26,14 @@ from .jobs import as_text, details, job_category_codes
 from .resume_text import ResumeError, pick_resumes, read_resume, resume_names, wrap_versions
 from .review import contains_term
 
-# The best version must score this much above the next one, else the AI compares them all.
-# Set from a real folder of four similar budget resumes: below about 1.3 the wording pick
-# disagreed with the AI as often as it agreed, so close calls go to the AI.
-CLEAR_LEAD = 1.3
+# Tuned on a real folder of four similar budget resumes. Duties, requirements and education
+# text is mostly generic and blurred the versions together, so only the title and the
+# qualifications (the specialized experience HR screens for) count. And a version must
+# lead the next by half again, else the AI compares them all: a wrong pick costs a note
+# written against the wrong resume, while sending them all only costs a bigger prompt.
+CLEAR_LEAD = 1.5
 TITLE_WEIGHT = 3
-# The parts of a posting that say what experience it wants (QualificationSummary is on
-# the posting itself, the rest under its details).
-POSTING_FIELDS = ("QualificationSummary", "MajorDuties", "Requirements", "KeyRequirements", "Education")
+POSTING_FIELDS = ("QualificationSummary",)  # on the posting, or else under its details
 SERIES = re.compile(r"\d{4}")
 WORD = re.compile(r"[a-z][a-z0-9]{2,}")
 STOP_WORDS = frozenset("""
@@ -118,8 +118,7 @@ def words(text: str) -> set[str]:
 
 
 def posting_words(job: Mapping[str, Any]) -> dict[str, int]:
-    """The posting's words, title words counting extra. Benefits and how-to-apply
-    text is left out: it's the same boilerplate in every posting."""
+    """The words of the posting's title (counting extra) and ``POSTING_FIELDS``."""
     detail = details(dict(job))
     wanted: dict[str, int] = {}
     for name in POSTING_FIELDS:
