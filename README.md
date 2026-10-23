@@ -427,7 +427,9 @@ Everything above works without AI. **[docs/AI.md](https://github.com/amv2/usajob
 | Gemini CLI | Google account + `gemini` command | `provider = "gemini-cli"` |
 | Local model (Ollama) | Ollama + a model; nothing leaves your computer | `provider = "ollama"`, `model = "llama3.1"` |
 | Claude API key (pay per use) | Key from the Claude Console | `provider = "anthropic"` (the default) |
-| OpenAI, Gemini or other API keys, or any program | That program | `provider = "command"` |
+| OpenAI, Gemini, OpenRouter or other API keys | Key from that service | `provider = "openai"`, `model = "gpt-5"`, `base_url` for non-OpenAI services |
+| LM Studio or another local model server | The server running; nothing leaves your computer | `provider = "openai"`, `base_url = "http://localhost:1234/v1"` |
+| Any other program | That program | `provider = "command"` |
 
 The rest of this section covers the details for all of them.
 
@@ -443,7 +445,7 @@ Then add to your profile, with the `provider` for the way you picked in [docs/AI
 
 ```toml
 [ai]
-provider    = "claude-cli"  # or codex-cli, gemini-cli, ollama, anthropic (API key), command
+provider    = "claude-cli"  # or codex-cli, gemini-cli, ollama, anthropic or openai (API key), command
 resume      = "resume.md"   # .md, .txt, .docx or .pdf, or a folder of versions; relative to this file
 send_resume = true          # required: without it your resume never leaves your computer
 fit_notes   = true          # add notes to every run
@@ -453,11 +455,11 @@ fit_notes   = true          # add notes to every run
 # model    = "opus"                      # optional; ollama needs one
 ```
 
-Every provider except `anthropic` runs a program on your computer, so you also allow it once outside the profile: `export USAJOBS_ALLOW_AI_PROVIDER=claude-cli` (put it in `~/.usajobs_env` for scheduled runs). With `anthropic`, store your key instead: `usajobs-monitor credentials set ANTHROPIC_API_KEY`.
+Every provider except `anthropic` and `openai` runs a program on your computer, so you also allow it once outside the profile: `export USAJOBS_ALLOW_AI_PROVIDER=claude-cli` (put it in `~/.usajobs_env` for scheduled runs). With `anthropic` or `openai`, store your key instead: `usajobs-monitor credentials set ANTHROPIC_API_KEY` (or `OPENAI_API_KEY`, `GEMINI_API_KEY`, ...).
 
 With `rank = true`, each list is sorted by fit level: strong, possible, then postings without a note, then stretch and unlikely. Nothing is dropped, so a wrong "unlikely" only moves a job down. The AI judges the minimum qualifications from your resume, not how the assessment questionnaire will place you.
 
-Notes are cached by posting, resume and model, so a run three times a week pays only for postings it hasn't reviewed yet. Changing your resume refreshes them. With several resume versions (a folder), each posting is judged by the version that fits it best, and the reports name it, for example "Strong (resume: Budget Director)". By default every version goes into each prompt, ahead of the posting, and the AI picks; with the `anthropic` provider the resumes are cached after the first posting of a run and later postings read them at a fraction of the price. A folder you keep adding tailored copies to is fine: past 5 versions, the 5 most recently changed are used.
+Notes are cached by posting, resume and model, so a run three times a week pays only for postings it hasn't reviewed yet. Changing your resume refreshes them. With several resume versions (a folder), each posting is judged by the version that fits it best, and the reports name it, for example "Strong (resume: Budget Director)". By default every version goes into each prompt, ahead of the posting, and the AI picks; with the `anthropic` provider (and `openai` services that cache prompts) the resumes are cached after the first posting of a run and later postings read them at a fraction of the price. A folder you keep adding tailored copies to is fine: past 5 versions, the 5 most recently changed are used.
 
 To send each posting only the version that fits it, set `resume_choice = "match"`. The tool picks on your computer, before anything is sent: first by your own rules, then by which version's distinctive wording best matches the posting's title and qualifications. Prompts get smaller, and less of your resume leaves your computer. The wording pick is deliberately cautious: when no version is well ahead, that posting gets every version as before, so with several similar resumes most postings may still get all of them. Rules are the surest way to steer it. The fit notes say how each version was picked, and `fit <control number> --preview` shows the pick without sending anything. Rules map a version to job series or title words, checked in order:
 
@@ -478,9 +480,9 @@ usajobs-monitor fit 812345600 --preview   # prints the prompt and your resume te
 usajobs-monitor fit 812345600             # sends it and prints the note
 ```
 
-**Privacy.** Your resume is read on your computer. It goes to the provider only when `ai.send_resume = true`, and only with postings from your own search. Each way's terms are in [docs/AI.md](https://github.com/amv2/usajobs-monitor/blob/main/docs/AI.md): with a subscription (Claude, ChatGPT, Google) it's that subscription's terms, with `anthropic` your API account's [commercial terms](https://www.anthropic.com/legal/commercial-terms), and with Ollama nothing leaves your computer. The posting and resume are passed to the model as data with instructions to ignore any instructions inside them, and the CLI providers run with their tools off (Claude) or read-only (Codex, Gemini). Fit notes are written by a model, so read the announcement before you rely on them.
+**Privacy.** Your resume is read on your computer. It goes to the provider only when `ai.send_resume = true`, and only with postings from your own search. Each way's terms are in [docs/AI.md](https://github.com/amv2/usajobs-monitor/blob/main/docs/AI.md): with a subscription (Claude, ChatGPT, Google) it's that subscription's terms, with `anthropic` your API account's [commercial terms](https://www.anthropic.com/legal/commercial-terms), with `openai` that service's API terms, and with Ollama or a local server nothing leaves your computer. The posting and resume are passed to the model as data with instructions to ignore any instructions inside them, and the CLI providers run with their tools off (Claude) or read-only (Codex, Gemini). Fit notes are written by a model, so read the announcement before you rely on them.
 
-**A profile can't run code by itself.** The CLI, Ollama and `command` providers run a program on your computer, so a profile that names one is refused until you also allow it outside the file with `USAJOBS_ALLOW_AI_PROVIDER`: the provider's name (`claude-cli`), or for `command` the exact command line (`'llm -m gpt-5'`; comma-separate several). `check-config` prints the value to set. The whole command line must match, so allowing `python3 my_model.py` doesn't let another profile run `python3 -c ...`. This way a profile someone shares with you can't start a program or import code just because you ran it. Read any shared profile's `[ai]` table before you allow it.
+**A profile can't run code by itself.** The CLI, Ollama and `command` providers run a program on your computer, so a profile that names one is refused until you also allow it outside the file with `USAJOBS_ALLOW_AI_PROVIDER`: the provider's name (`claude-cli`), or for `command` the exact command line (`'ollama run llama3.1'`; comma-separate several). `check-config` prints the value to set. The whole command line must match, so allowing `python3 my_model.py` doesn't let another profile run `python3 -c ...`. This way a profile someone shares with you can't start a program or import code just because you ran it. The same goes for an `openai` `base_url` that isn't a known service or on your computer, since it would get your resume and API key: allow that address the same way. Read any shared profile's `[ai]` table before you allow it.
 
 ### MCP server
 
@@ -587,11 +589,7 @@ Good habits:
 | 8 | Closing-soon alerts with a configurable window, application tracking (interview, offer, rejected, withdrawn, application dates, days waiting), shorter per-job fit lines in email, and installing from PyPI with `pipx` | Done (v0.3.0) |
 | 9 | Runs survive a single failed search (marked incomplete, failed searches named, nothing reported dropped), a security policy with private vulnerability reporting, and weekly CI with a dependency audit | Done (v0.3.1) |
 
-Phases 1 to 6 shipped in v0.1.0. Ideas under consideration, not promises:
-
-- A built-in provider for OpenAI-compatible APIs (OpenAI, Gemini, OpenRouter, LM Studio and others), so API-key users don't need the `llm` tool.
-
-Suggestions are welcome as issues.
+Phases 1 to 6 shipped in v0.1.0. Ideas and suggestions are welcome as issues.
 
 ## Contributing
 

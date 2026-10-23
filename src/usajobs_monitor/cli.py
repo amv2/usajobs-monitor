@@ -83,7 +83,13 @@ def _ai_status(settings) -> str:
     from .config import AI_ALLOW_ENV, ai_provider_allowance, ai_provider_allowed
     if not ai_provider_allowed(ai, os.environ):
         line += f"; this computer: not allowed yet (set {AI_ALLOW_ENV}={shlex.quote(ai_provider_allowance(ai))})"
-    if ai["provider"] == "anthropic":
+    if ai["provider"] == "openai":
+        from .config import openai_host, openai_is_local
+        host = openai_host(ai["base_url"])
+        line += f"; server: {host}"
+        if openai_is_local(host) and not ai["api_key_env"]:
+            return line + " (on this computer, no API key)"
+    if ai["provider"] in ("anthropic", "openai"):
         from . import keychain
         line += f"; {ai['api_key_env']}: " + ("found" if keychain.environment().source(ai["api_key_env"]) else "missing")
     return line
@@ -369,7 +375,7 @@ def _credential_names(config_path: Path) -> list[tuple[str, bool]]:
         if isinstance(settings, dict) and settings.get("enabled", True):
             names += [(settings[key], key != "token_env") for key in DELIVERY_SECRET_ENV[channel]]
     ai = load_settings(config_path, require_credentials=False).config["ai"]
-    if ai["provider"] == "anthropic" and (ai["fit_notes"] or ai["send_resume"]):
+    if ai["provider"] in ("anthropic", "openai") and ai["api_key_env"] and (ai["fit_notes"] or ai["send_resume"]):
         names.append((ai["api_key_env"], False))
     return names
 

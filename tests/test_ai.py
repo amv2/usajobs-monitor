@@ -1,6 +1,7 @@
 """Offline checks for the optional AI add-on: config, resume reading, fit notes and providers."""
 
 from datetime import date
+import http.server
 import importlib.util
 import json
 import os
@@ -9,6 +10,7 @@ import subprocess
 from pathlib import Path
 import sys
 import tempfile
+import threading
 import unittest
 from unittest import mock
 
@@ -696,6 +698,207 @@ class ProviderTests(unittest.TestCase):
             with self.assertRaises(FitError) as caught:
                 provider.complete("s", "p")
         self.assertTrue(caught.exception.fatal)
+
+
+class FakeChatServer:
+    """A Chat Completions server on 127.0.0.1 that records requests and replies
+    from a queue of ``(status, body)``."""
+
+    def __init__(self, replies):
+        self.replies, self.requests = list(replies), []
+        server = self
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_POST(self):  # noqa: N802
+                length = int(self.headers.get("Content-Length") or 0)
+                server.requests.append((self.path, dict(self.headers), json.loads(self.rfile.read(length))))
+                status, body = server.replies.pop(0)
+                payload = body if isinstance(body, bytes) else json.dumps(body).encode()
+                self.send_response(status)
+                if 300 <= status < 400:
+                    self.send_header("Location", "https://example.com/elsewhere")
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+
+            def log_message(self, *args):
+                pass
+
+        self.httpd = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+        self.url = f"http://127.0.0.1:{self.httpd.server_port}/v1"
+        threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
+
+    def close(self):
+        self.httpd.shutdown()
+        self.httpd.server_close()
+
+
+def chat_reply(content, finish="stop", **message):
+    return {"choices": [{"index": 0, "finish_reason": finish,
+                         "message": {"role": "assistant", "content": content, **message}}]}
+
+
+class OpenAIProviderTests(unittest.TestCase):
+    def ai(self, **values):
+        raw = {"provider": "openai", "model": "gpt-5", **values}
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("USAJOBS_ALLOW_AI_PROVIDER", None)
+            config, warnings = validate_config({**BASE, "ai": raw})
+        return config["ai"], warnings
+
+    def serve(self, *replies):
+        server = FakeChatServer(replies)
+        self.addCleanup(server.close)
+        return server
+
+    def test_config_defaults_and_known_services(self):
+        ai, warnings = self.ai()
+        self.assertEqual((ai["base_url"], ai["api_key_env"], ai["response_format"], ai["effort"]),
+                         ("https://api.openai.com/v1", "OPENAI_API_KEY", "json_schema", ""))
+        self.assertEqual(warnings, [])
+        ai, warnings = self.ai(base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
+                               model="gemini-flash-latest")
+        self.assertEqual((ai["base_url"], ai["api_key_env"]),
+                         ("https://generativelanguage.googleapis.com/v1beta/openai", "GEMINI_API_KEY"))
+        self.assertEqual(warnings, [])
+        ai, _ = self.ai(base_url="https://openrouter.ai/api/v1", api_key_env="MY_ROUTER_KEY")
+        self.assertEqual(ai["api_key_env"], "MY_ROUTER_KEY")
+        ai, warnings = self.ai(base_url="http://localhost:1234/v1", model="qwen3-8b")
+        self.assertEqual((ai["api_key_env"], warnings), ("", []))  # a local server needs no key
+
+    def test_config_errors_name_the_setting(self):
+        cases = [({"model": ""}, "ai.model"),
+                 ({"model": "--x"}, "ai.model"),
+                 ({"base_url": "ftp://example.com/v1"}, "ai.base_url"),
+                 ({"base_url": "http://api.example.com/v1"}, "plain http"),
+                 ({"base_url": "http://192.168.1.20:11434/v1"}, "plain http"),
+                 ({"base_url": "https://user:pw@api.openai.com/v1"}, "ai.base_url"),
+                 ({"base_url": "https://api.openai.com/v1?key=x"}, "ai.base_url"),
+                 ({"base_url": "https://llm.example.com/v1"}, "ai.api_key_env"),
+                 ({"response_format": "xml"}, "ai.response_format"),
+                 ({"effort": "huge"}, "ai.effort")]
+        for values, setting in cases:
+            with self.assertRaises(ConfigError, msg=values) as caught:
+                self.ai(**values)
+            self.assertIn(setting, str(caught.exception))
+        with self.assertRaises(ConfigError) as caught:
+            validate_config({**BASE, "ai": {"base_url": "https://api.openai.com/v1"}})
+        self.assertIn('ai.base_url: only used with provider = "openai"', str(caught.exception))
+
+    def test_unknown_server_must_be_allowed(self):
+        ai, warnings = self.ai(base_url="https://llm.example.com/v1", api_key_env="EXAMPLE_KEY")
+        self.assertTrue(any("llm.example.com, which is not a known AI service" in w
+                            and "USAJOBS_ALLOW_AI_PROVIDER=https://llm.example.com/v1" in w for w in warnings),
+                        warnings)
+        with self.assertRaises(FitError) as caught:
+            fit.make_provider(ai, env={"EXAMPLE_KEY": "k"})
+        self.assertTrue(caught.exception.fatal)
+        self.assertNotIn("k\n", str(caught.exception))
+        provider = fit.make_provider(ai, env={"EXAMPLE_KEY": "k",
+                                              "USAJOBS_ALLOW_AI_PROVIDER": "https://llm.example.com/v1"})
+        self.assertIsInstance(provider, fit.OpenAIProvider)
+        for url in ("https://api.openai.com/v1", "http://127.0.0.1:8000/v1", "http://localhost:11434/v1"):
+            self.assertTrue(fit.ai_provider_allowed({**ai, "base_url": url}, {}), url)
+
+    def test_hosted_service_needs_a_key(self):
+        ai, _ = self.ai()
+        with self.assertRaises(FitError) as caught:
+            fit.make_provider(ai, env={})
+        self.assertIn("OPENAI_API_KEY", str(caught.exception))
+
+    def test_round_trip_with_a_local_server(self):
+        server = self.serve((200, chat_reply("Sure: " + json.dumps(GOOD_ANSWER))))
+        ai, _ = self.ai(base_url=server.url, model="qwen3-8b")
+        provider = fit.make_provider(ai, env={"HTTP_PROXY": "http://proxy.invalid:1"})
+        with mock.patch.dict(os.environ, {"HTTP_PROXY": "http://proxy.invalid:1"}):
+            answer = provider.complete("the system", "the prompt")
+        self.assertEqual(fit.parse_fit(answer)["fit"], "possible")
+        path, headers, body = server.requests[0]
+        self.assertEqual(path, "/v1/chat/completions")
+        self.assertNotIn("Authorization", headers)
+        self.assertEqual(body["model"], "qwen3-8b")
+        self.assertEqual(body["messages"], [{"role": "system", "content": "the system"},
+                                            {"role": "user", "content": "the prompt"}])
+        self.assertEqual(body["response_format"]["json_schema"]["schema"], fit.FIT_SCHEMA)
+        self.assertTrue(body["response_format"]["json_schema"]["strict"])
+        self.assertNotIn("reasoning_effort", body)
+        self.assertEqual(provider.label, "openai qwen3-8b at 127.0.0.1")
+
+    def test_key_effort_and_plain_formats(self):
+        server = self.serve((200, chat_reply(json.dumps(GOOD_ANSWER))), (200, chat_reply(json.dumps(GOOD_ANSWER))))
+        ai, _ = self.ai(base_url=server.url, api_key_env="LOCAL_KEY", effort="low", response_format="json_object")
+        fit.make_provider(ai, env={"LOCAL_KEY": "sk-local"}).complete("s", "p")
+        _, headers, body = server.requests[0]
+        self.assertEqual(headers["Authorization"], "Bearer sk-local")
+        self.assertEqual((body["reasoning_effort"], body["response_format"]), ("low", {"type": "json_object"}))
+        self.assertIn("JSON Schema", body["messages"][1]["content"])
+        ai, _ = self.ai(base_url=server.url, response_format="none")
+        fit.make_provider(ai, env={}).complete("s", "p")
+        body = server.requests[1][2]
+        self.assertNotIn("response_format", body)
+        self.assertTrue(body["messages"][1]["content"].startswith("Answer with only a JSON object"))
+
+    def test_errors_are_fixed_text_and_fatal_when_they_repeat(self):
+        cases = [(401, "rejected the API key", True), (404, "does not know ai.model", True),
+                 (400, 'ai.response_format = "json_object"', True), (302, "redirect", True),
+                 (418, "returned HTTP 418", False)]
+        for status, message, fatal in cases:
+            server = self.serve((status, {"error": {"message": "secret detail"}}))
+            ai, _ = self.ai(base_url=server.url)
+            with self.assertRaises(FitError, msg=status) as caught:
+                fit.make_provider(ai, env={}).complete("s", "p")
+            self.assertIn(message, str(caught.exception))
+            self.assertNotIn("secret detail", str(caught.exception))
+            self.assertEqual(caught.exception.fatal, fatal, status)
+
+    def test_rate_limits_are_retried_then_reported(self):
+        server = self.serve((429, {}), (503, {}), (200, chat_reply(json.dumps(GOOD_ANSWER))))
+        ai, _ = self.ai(base_url=server.url)
+        provider = fit.make_provider(ai, env={})
+        waits = []
+        provider.sleep = waits.append
+        self.assertEqual(fit.parse_fit(provider.complete("s", "p"))["fit"], "possible")
+        self.assertEqual(waits, list(fit.OpenAIProvider.RETRY_WAITS))
+        server = self.serve((429, {}), (429, {}), (429, {}))
+        provider = fit.make_provider({**ai, "base_url": server.url}, env={})
+        provider.sleep = lambda seconds: None
+        with self.assertRaises(FitError) as caught:
+            provider.complete("s", "p")
+        self.assertIn("rate limiting", str(caught.exception))
+        self.assertFalse(caught.exception.fatal)
+        server = self.serve((503, {}), (503, {}), (503, {}))
+        provider = fit.make_provider({**ai, "base_url": server.url}, env={})
+        provider.sleep = lambda seconds: None
+        with self.assertRaises(FitError) as caught:
+            provider.complete("s", "p")
+        self.assertIn("busy or having trouble (HTTP 503)", str(caught.exception))
+        self.assertFalse(caught.exception.fatal)
+
+    def test_unusual_answers(self):
+        cases = [(chat_reply("{}", finish="length"), "cut off"), (chat_reply(None, refusal="no"), "declined"),
+                 (chat_reply(""), "empty answer"), ({"id": "x"}, "Chat Completions format"),
+                 (b"not json", "Chat Completions format")]
+        for body, message in cases:
+            server = self.serve((200, body))
+            ai, _ = self.ai(base_url=server.url)
+            with self.assertRaises(FitError) as caught:
+                fit.make_provider(ai, env={}).complete("s", "p")
+            self.assertIn(message, str(caught.exception))
+        parts = chat_reply([{"type": "text", "text": json.dumps(GOOD_ANSWER)}])
+        server = self.serve((200, parts))
+        ai, _ = self.ai(base_url=server.url)
+        self.assertEqual(fit.parse_fit(fit.make_provider(ai, env={}).complete("s", "p"))["fit"], "possible")
+
+    def test_nothing_listening(self):
+        server = self.serve()
+        url = server.url
+        server.close()
+        ai, _ = self.ai(base_url=url)
+        with self.assertRaises(FitError) as caught:
+            fit.make_provider(ai, env={}).complete("s", "p")
+        self.assertTrue(caught.exception.fatal)
+        self.assertIn("model server is running", str(caught.exception))
 
 
 class CoreWithoutAiTests(unittest.TestCase):
