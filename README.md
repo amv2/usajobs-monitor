@@ -588,6 +588,7 @@ Good habits:
 | 7 | AI fit ranking (strong, possible, stretch, unlikely) with an "AI gaps" line, several resume versions with the best one named per job, resume-first prompt caching, and ready-made providers for the Claude Code, Codex and Gemini CLIs and Ollama ([docs/AI.md](https://github.com/amv2/usajobs-monitor/blob/main/docs/AI.md)) | Done (v0.2.0) |
 | 8 | Closing-soon alerts with a configurable window, application tracking (interview, offer, rejected, withdrawn, application dates, days waiting), shorter per-job fit lines in email, and installing from PyPI with `pipx` | Done (v0.3.0) |
 | 9 | Runs survive a single failed search (marked incomplete, failed searches named, nothing reported dropped), a security policy with private vulnerability reporting, and weekly CI with a dependency audit | Done (v0.3.1) |
+| 10 | A built-in provider for OpenAI-compatible APIs (OpenAI, Gemini, OpenRouter, LM Studio and others) and an option to send each posting only the resume version that fits it (`resume_choice = "match"`) | Done (v0.4.0) |
 
 Phases 1 to 6 shipped in v0.1.0. Ideas and suggestions are welcome as issues.
 
