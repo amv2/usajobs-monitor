@@ -78,6 +78,8 @@ def _ai_status(settings) -> str:
     provider = f"{ai['provider']} {ai['model']}" if ai["model"] and ai["provider"] != "command" else ai["provider"]
     sending = "allowed" if ai["send_resume"] else "not allowed (set ai.send_resume = true)"
     line = f"AI fit notes: on ({provider}); resume: {resume}; sending it to the provider: {sending}"
+    if ai["resume_choice"] == "match" and "," in resume:
+        line += "; one version per posting where one clearly fits (ai.resume_choice = \"match\")"
     from .config import AI_ALLOW_ENV, ai_provider_allowance, ai_provider_allowed
     if not ai_provider_allowed(ai, os.environ):
         line += f"; this computer: not allowed yet (set {AI_ALLOW_ENV}={shlex.quote(ai_provider_allowance(ai))})"
@@ -280,15 +282,15 @@ def cmd_init(args: argparse.Namespace) -> int:
 def cmd_fit(args: argparse.Namespace) -> int:
     """Fit notes for one posting, printed as Markdown."""
     from .fit import SYSTEM_PROMPT, FitError, build_prompt, fit_note, make_provider, render_note
-    from .resume_text import ResumeError, find_resumes, read_resumes, resume_names
+    from .resume_choice import load_resume_set
+    from .resume_text import ResumeError
     from .tools import review_posting
 
     settings = load_settings(args.config)
     _print_warnings(settings.warnings)
     ai = settings.config["ai"]
     try:
-        resume_paths = find_resumes(args.resume or settings.ai_resume, settings.resume_folder)
-        resume = read_resumes(resume_paths)
+        resumes = load_resume_set(args.resume or settings.ai_resume, settings.resume_folder, ai)
         result, tier = review_posting(settings, args.control_number)
     except (ResumeError, ValueError) as exc:  # includes tools.ToolInputError
         print(f"fit: {exc}", file=sys.stderr)
@@ -297,24 +299,27 @@ def cmd_fit(args: argparse.Namespace) -> int:
         print(f"fit: {exc}", file=sys.stderr)
         return 1
     label = tier.replace("_", " ")
+    pick = resumes.pick(result.job)
     if args.preview:
-        print(f"Nothing was sent. This is what ai.provider = \"{ai['provider']}\" would receive "
-              f"for {', '.join(path.name for path in resume_paths)}:\n")
-        print(f"--- system ---\n{SYSTEM_PROMPT}\n\n--- user ---\n{build_prompt(result, resume, label)}")
+        sent = (f"the {pick.name} version ({pick.reason})" if pick.name
+                else ", ".join(path.name for path in resumes.paths))
+        print(f"Nothing was sent. This is what ai.provider = \"{ai['provider']}\" would receive for {sent}:\n")
+        print(f"--- system ---\n{SYSTEM_PROMPT}\n\n--- user ---\n{build_prompt(result, pick.text, label)}")
         return 0
     if ai["send_resume"] is not True:
         print("fit: your resume is only sent to the AI provider when the config sets ai.send_resume = true. "
               "Run with --preview to see exactly what would be sent.", file=sys.stderr)
         return 2
     try:
-        names = resume_names(resume_paths) if len(resume_paths) > 1 else []
-        note = fit_note(result, resume, make_provider(ai), label, names)
+        note = fit_note(result, pick.text, make_provider(ai), label, pick.names)
     except FitError as exc:
         print(f"fit: {exc}", file=sys.stderr)
         return 1
     job = result.job
     print(f"# {job.get('PositionTitle', '')}, {job.get('OrganizationName', '')}\n")
     print(f"{label.capitalize()} · control number {args.control_number.strip()} · {job.get('PositionURI', '')}\n")
+    if pick.name:
+        note = {**note, "resume_used": pick.name, "resume_reason": pick.reason}
     print(render_note(note))
     return 0
 

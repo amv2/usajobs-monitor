@@ -49,7 +49,8 @@ from .jobs import (
     salary_display,
 )
 from .config import AI_PRESETS, ai_preset_command, ai_provider_allowed, ai_provider_hint
-from .resume_text import MAX_RESUMES, ResumeError, pick_resumes, read_resumes, resume_names
+from .resume_choice import load_resume_set
+from .resume_text import MAX_RESUMES, ResumeError
 from .review import ReviewResult
 from .tracking import FIT_LABELS, FIT_RANK
 
@@ -404,9 +405,7 @@ def run_fit_notes(settings: Any, view: Any, output_dir: Path, today: date,
     if not picked:
         return {"status": "ok", "notes": 0, "from_cache": 0, "failed": 0}
     try:
-        paths, left_out = pick_resumes(settings.ai_resume, settings.resume_folder)
-        resume = read_resumes(paths)
-        names = resume_names(paths) if len(paths) > 1 else []
+        resumes = load_resume_set(settings.ai_resume, settings.resume_folder, ai)
         provider = provider or make_provider(ai)
     except (ResumeError, FitError) as exc:
         return {"status": "error", "message": str(exc)}
@@ -420,13 +419,14 @@ def run_fit_notes(settings: Any, view: Any, output_dir: Path, today: date,
     from_cache = 0
     for tier, result in picked:
         number = job_id(result.job)
-        key = cache_key(number, resume, label)
+        pick = resumes.pick(result.job)
+        key = cache_key(number, pick.text, label)
         note = cache.get(key)
         if note is not None:
             from_cache += 1
         else:
             try:
-                note = {**fit_note(result, resume, provider, tier, names), "generated_on": today.isoformat(),
+                note = {**fit_note(result, pick.text, provider, tier, pick.names), "generated_on": today.isoformat(),
                         "provider": label}
             except FitError as exc:
                 failures.append(f"{number}: {exc}")
@@ -437,6 +437,9 @@ def run_fit_notes(settings: Any, view: Any, output_dir: Path, today: date,
                 failures.append(f"{number}: fit note failed ({type(exc).__name__})")
                 continue
             cache[key] = note
+        # Picked here, so the version sent is the one used; the cached note may predate a rule.
+        note = {**note, "resume_used": pick.name, "resume_reason": pick.reason} if pick.name else \
+            {name: value for name, value in note.items() if name != "resume_reason"}
         view.fits[number] = note["fit"]
         if note.get("resume_used"):
             view.fit_resumes[number] = note["resume_used"]
@@ -465,9 +468,12 @@ def run_fit_notes(settings: Any, view: Any, output_dir: Path, today: date,
         outcome["cache_read_tokens"] = provider.cache_read_tokens
     if failures:
         outcome["message"] = failures[0].partition(": ")[2]
-    elif left_out:
-        outcome["message"] = (f"used the {MAX_RESUMES} most recently changed resumes; {left_out} older "
-                              f"{'one was' if left_out == 1 else 'ones were'} left out")
+    elif resumes.left_out:
+        outcome["message"] = (f"used the {MAX_RESUMES} most recently changed resumes; {resumes.left_out} older "
+                              f"{'one was' if resumes.left_out == 1 else 'ones were'} left out")
+    if resumes.match and len(resumes.texts) > 1:
+        # How many postings went with one version instead of all of them.
+        outcome["one_resume_sent"] = sum(1 for note in notes if note.get("resume_reason"))
     return outcome
 
 
@@ -506,7 +512,8 @@ def render_note(note: Mapping[str, Any]) -> str:
     lines = [f"**Fit: {FIT_LABELS.get(note['fit'], note['fit'])}.**" + (f" ({lowered}.)" if lowered else "")
              + f" {note['summary']}".rstrip()]
     if note.get("resume_used"):
-        lines += ["", f"Best resume for this posting: {note['resume_used']}"]
+        how = f"picked before sending: {note['resume_reason']}" if note.get("resume_reason") else "the AI's choice"
+        lines += ["", f"Best resume for this posting: {note['resume_used']} ({how})"]
     if note.get("requirements"):
         lines += ["", "Requirements:"]
         for item in note["requirements"]:
