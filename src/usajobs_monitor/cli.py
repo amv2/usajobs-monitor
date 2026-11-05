@@ -194,8 +194,9 @@ def cmd_profiles(args: argparse.Namespace) -> int:
 def cmd_decide(args: argparse.Namespace) -> int:
     from datetime import date
 
+    from .jobs import plain_text
     from .tracking import (HIDDEN_STATUSES, STATUS_HELP, decision_lines, load_decisions, load_history,
-                           normalize_status, save_decision)
+                           normalize_status, save_decision, status_label)
 
     settings = load_settings(args.config, require_credentials=False)
     path = settings.decisions_path
@@ -208,7 +209,7 @@ def cmd_decide(args: argparse.Namespace) -> int:
         seen_jobs = (load_history(settings.history_path) or {}).get("jobs") or {}
         for number, decision in decisions.items():
             for key in ("title", "agency"):
-                decision[key] = decision.get(key) or str((seen_jobs.get(number) or {}).get(key) or "")
+                decision[key] = decision.get(key) or plain_text((seen_jobs.get(number) or {}).get(key))
         for line in decision_lines(decisions, date.today()):
             print(line)
         return 0
@@ -217,7 +218,8 @@ def cmd_decide(args: argparse.Namespace) -> int:
         return 2
     number = args.control_number.strip()
     seen = ((load_history(settings.history_path) or {}).get("jobs") or {}).get(number) or {}
-    title = str(seen.get("title") or "")
+    title = plain_text(seen.get("title"))
+    agency = plain_text(seen.get("agency"))
     try:
         applied_on = date.fromisoformat(args.applied_on) if args.applied_on else None
     except ValueError:
@@ -225,16 +227,16 @@ def cmd_decide(args: argparse.Namespace) -> int:
         return 2
     try:
         previous = save_decision(path, number, args.status, " ".join(args.note), title,
-                                 agency=str(seen.get("agency") or ""), applied_on=applied_on)
+                                 agency=agency, applied_on=applied_on)
     except ValueError as exc:
         print(f"decide: {exc}", file=sys.stderr)
         return 2
     status = normalize_status(args.status)
-    label = f"{number} ({title}, {seen.get('agency', '')})" if title else number
+    label = f"{number} ({title}, {agency})" if title else number
     if status == "clear":
         print(f"Cleared the decision for {label}." if previous else f"{label} had no decision; nothing changed.")
     else:
-        print(f"Marked {label} as {status.replace('_', ' ')}"
+        print(f"Marked {label} as {status_label(status)}"
               + (f" (was {previous.get('status')})" if previous else "") + f". Saved in {path}.")
         if status in HIDDEN_STATUSES:
             print("It is hidden from the next run's lists.")
@@ -491,12 +493,13 @@ def build_parser() -> argparse.ArgumentParser:
     search.add_argument("--output-dir", type=Path, help="write reports here instead of paths.reports_dir")
     add("check-config", "Validate the config and report what a run would do. Never prints credentials.", cmd_check_config)
     decide = add("decide", "Record what you did about a job: applied, interview, offer, watching, or rejected, "
-                           "withdrawn and not_interested (hidden from later runs), with an optional note. With no "
+                           "withdrawn, cancelled (the agency cancelled the posting) and not_interested (hidden "
+                           "from later runs), with an optional note. With no "
                            "arguments, list your applications with days waiting, then your other decisions.",
                  cmd_decide)
     decide.add_argument("control_number", nargs="?", help="the number in the job's USAJOBS link")
-    decide.add_argument("status", nargs="?", help="applied, interview, offer, rejected, withdrawn, watching, "
-                                                  "not_interested, or clear to remove it")
+    decide.add_argument("status", nargs="?", help="applied, interview, offer, rejected, withdrawn, cancelled, "
+                                                  "watching, not_interested, or clear to remove it")
     decide.add_argument("note", nargs="*", help="optional note, e.g. \"referred, interview 11/3\"")
     decide.add_argument("--applied-on", metavar="YYYY-MM-DD",
                         help="the day you applied, for an application made before you started tracking it "

@@ -148,7 +148,7 @@ def active_filters_text(config: dict[str, Any], decisions_name: str) -> list[str
     line += ". Hard-no failures (mismatches, executive roles, excluded series, other agencies' internal postings, no role signal) are never listed."
     lines.append(line)
 
-    lines.append(f"Your decisions: postings marked not interested, rejected or withdrawn in {decisions_name} "
+    lines.append(f"Your decisions: postings marked not interested, rejected, withdrawn or cancelled in {decisions_name} "
                  "are hidden; applied, interview, offer and watching postings are flagged.")
     ai = config.get("ai") or {}
     if ai.get("rank") and ai.get("fit_notes") and ai.get("send_resume") is True:

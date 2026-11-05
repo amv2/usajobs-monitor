@@ -428,6 +428,18 @@ class HistoryAndDecisionTests(unittest.TestCase):
         self.assertEqual(view.your_status(by_title["4"]), "offer (GS-14)")
         self.assertEqual(view.history["jobs"]["1"]["list"], "hidden")
 
+    def test_cancelled_hides_and_reads_as_cancelled_by_agency(self):
+        decisions = {"1": {"status": "cancelled", "note": "re-posted later", "applied_on": "2026-10-24"},
+                     "2": {"status": "withdrawn", "note": "", "applied_on": "2026-10-01"}}
+        view = self.view([result("1", [], number=1), result("2", [], number=2)], decisions=decisions)
+        self.assertEqual(sorted(r.job["PositionTitle"] for r in view.hidden), ["1", "2"])
+        self.assertEqual(view.flags["1"], [])
+        by_title = {r.job["PositionTitle"]: r for r in view.hidden}
+        self.assertEqual(view.your_status(by_title["1"]),
+                         "cancelled by agency (re-posted later; applied 2026-10-24)")
+        self.assertEqual(view.your_status(by_title["2"]), "withdrawn (applied 2026-10-01)")
+        self.assertEqual(view.history["jobs"]["1"]["list"], "hidden")
+
     def test_load_decisions(self):
         import tempfile
         from pathlib import Path

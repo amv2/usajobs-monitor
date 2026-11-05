@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import html
 import re
 from datetime import date
 from typing import Any
@@ -39,6 +40,24 @@ def as_text(value: Any) -> str:
     if isinstance(value, dict):
         return " ".join(as_text(v) for v in value.values())
     return str(value)
+
+
+# Only the entities that turn up in copied or re-encoded text, each with its semicolon:
+# html.unescape alone would also turn "&reg" in "Budget &regulatory" into a symbol.
+_ENTITY = re.compile(r"&(?:amp|lt|gt|quot|apos|#\d{1,7}|#[xX][0-9a-fA-F]{1,6});")
+
+
+def plain_text(value: Any) -> str:
+    """A title or agency name with HTML entities decoded: "Budget &amp;amp; Finance" becomes
+    "Budget & Finance". Plain text, including a bare "&", is returned as it is."""
+    text = str(value or "")
+    # Twice-encoded text ("&amp;amp;") needs more than one pass.
+    for _ in range(3):
+        decoded = _ENTITY.sub(lambda match: html.unescape(match.group(0)), text)
+        if decoded == text:
+            break
+        text = decoded
+    return text
 
 
 def mapping_list(value: Any) -> list[dict[str, Any]]:

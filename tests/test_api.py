@@ -113,5 +113,26 @@ class NoRedirectTests(unittest.TestCase):
         self.assertEqual(opened.call_count, 2)
 
 
+class DisplayTextTests(unittest.TestCase):
+    def test_descriptor_decodes_entities_in_names_only(self):
+        item = {"MatchedObjectDescriptor": {"PositionTitle": "Management &amp; Program Analyst",
+                                            "OrganizationName": "Office of Budget &amp;amp; Finance",
+                                            "DepartmentName": "Department of Examples",
+                                            "QualificationSummary": "Keep &amp; as sent"}}
+        job = api.descriptor(item)
+        self.assertEqual(job["PositionTitle"], "Management & Program Analyst")
+        self.assertEqual(job["OrganizationName"], "Office of Budget & Finance")
+        self.assertEqual(job["QualificationSummary"], "Keep &amp; as sent")
+        self.assertEqual(api.descriptor({}), {})
+
+    def test_plain_text_leaves_plain_ampersands_and_lookalikes(self):
+        from usajobs_monitor.jobs import plain_text
+        for text in ("Budget & Finance", "R&D Program Analyst", "Budget &regulatory", "S&B", "AT&T", ""):
+            self.assertEqual(plain_text(text), text)
+        self.assertEqual(plain_text("Analyst &lt;GS-13&gt; &#38; &#x26; &quot;Lead&quot;"),
+                         'Analyst <GS-13> & & "Lead"')
+        self.assertEqual(plain_text(None), "")
+
+
 if __name__ == "__main__":
     unittest.main()
