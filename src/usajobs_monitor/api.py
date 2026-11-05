@@ -10,6 +10,7 @@ from urllib.parse import urlencode
 from urllib.request import Request
 
 from . import net
+from .jobs import plain_text
 
 USAJOBS_SEARCH_URL = "https://data.usajobs.gov/api/search"
 RESULTS_PER_PAGE = 500  # USAJOBS Search API maximum
@@ -66,8 +67,18 @@ def api_items(payload: dict[str, Any]) -> list[dict[str, Any]]:
     return payload.get("SearchResult", {}).get("SearchResultItems", []) or []
 
 
+DISPLAY_FIELDS = ("PositionTitle", "OrganizationName", "DepartmentName")
+
+
 def descriptor(item: dict[str, Any]) -> dict[str, Any]:
-    return item.get("MatchedObjectDescriptor", {}) or {}
+    """The posting record, with entity-encoded names ("&amp;") decoded so reports, history
+    and saved decisions show "&" (the HTML report escapes it again on output)."""
+    job = item.get("MatchedObjectDescriptor", {}) or {}
+    for key in DISPLAY_FIELDS:
+        value = job.get(key)
+        if isinstance(value, str) and "&" in value:
+            job[key] = plain_text(value)
+    return job
 
 
 def result_count_all(payload: dict[str, Any]) -> int:

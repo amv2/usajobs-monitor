@@ -11,14 +11,19 @@ from pathlib import Path
 from typing import Any
 
 from .config import CLOSING_SOON_DAYS
-from .jobs import GS_SCALE_PAY_PLANS, close_date, grade_numbers, job_id, job_pay_plans, job_url, salary_upper
+from .jobs import (GS_SCALE_PAY_PLANS, close_date, grade_numbers, job_id, job_pay_plans, job_url, plain_text,
+                   salary_upper)
 from .reasons import Code, code_of, is_hard_no
 from .review import VERIFY_ELIGIBILITY_FLAG, ReviewResult, needs_eligibility_check
 
 HISTORY_NAME = "usajobs_job_history.json"
-DECISION_STATUSES = {"applied", "interview", "offer", "rejected", "withdrawn", "not_interested", "watching"}
-# Postings with these statuses are hidden from later runs: you passed on them, or the application is over.
-HIDDEN_STATUSES = {"not_interested", "rejected", "withdrawn"}
+DECISION_STATUSES = {"applied", "interview", "offer", "rejected", "withdrawn", "cancelled", "not_interested",
+                     "watching"}
+# Postings with these statuses are hidden from later runs: you passed on them, or the application is over
+# (``cancelled`` is the agency cancelling the posting, ``withdrawn`` is you pulling out).
+HIDDEN_STATUSES = {"not_interested", "rejected", "withdrawn", "cancelled"}
+# How a status reads in reports and ``decide`` messages, where it isn't just the status with spaces.
+STATUS_LABELS = {"not_interested": "not interested", "cancelled": "cancelled by agency"}
 # Applications still in progress: flagged on every run and listed by ``decide`` with days waiting.
 ACTIVE_STATUSES = {"applied", "interview", "offer"}
 STALE_DAYS = 30
@@ -117,8 +122,8 @@ def load_decisions(path: Path) -> tuple[dict[str, dict[str, str]], list[str]]:
                                 + ", ".join(sorted(DECISION_STATUSES)))
                 continue
             decisions[number] = {"status": status, "note": str(row.get("note") or "").strip(),
-                                 "title": str(row.get("title") or "").strip(),
-                                 "agency": str(row.get("agency") or "").strip(),
+                                 "title": plain_text(row.get("title")).strip(),
+                                 "agency": plain_text(row.get("agency")).strip(),
                                  "applied_on": _applied_on(row), "decided_on": _iso_date(row.get("decided_on"))}
     return decisions, warnings
 
@@ -131,9 +136,16 @@ DECISION_ALIASES = {"not_interested": "not_interested", "not": "not_interested",
                     "rejected": "rejected", "reject": "rejected", "not_referred": "rejected",
                     "not_selected": "rejected",
                     "withdrawn": "withdrawn", "withdraw": "withdrawn", "withdrew": "withdrawn",
+                    "cancelled": "cancelled", "canceled": "cancelled", "cancel": "cancelled",
+                    "posting_cancelled": "cancelled", "posting_canceled": "cancelled",
                     "clear": "clear", "remove": "clear", "undo": "clear"}
-STATUS_HELP = "applied, interview, offer, rejected, withdrawn, watching, not_interested or clear"
+STATUS_HELP = "applied, interview, offer, rejected, withdrawn, cancelled, watching, not_interested or clear"
 DECISION_COLUMNS = ["control_number", "status", "note", "title", "agency", "applied_on", "decided_on"]
+
+
+def status_label(status: str) -> str:
+    """"not interested", "cancelled by agency", or the status itself."""
+    return STATUS_LABELS.get(status, status.replace("_", " "))
 
 
 def normalize_status(value: str) -> str:
@@ -181,8 +193,8 @@ def save_decision(path: Path, number: str, status: str, note: str = "", title: s
             applied = today.isoformat()
         row = {"control_number": number, "status": status,
                "note": note.strip() or str((previous or {}).get("note") or ""),
-               "title": title or str((previous or {}).get("title") or ""),
-               "agency": agency or str((previous or {}).get("agency") or ""),
+               "title": plain_text(title or (previous or {}).get("title")),
+               "agency": plain_text(agency or (previous or {}).get("agency")),
                "applied_on": applied, "decided_on": today.isoformat()}
         kept.append({key: value for key, value in row.items() if key in columns})
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -296,9 +308,10 @@ class RunView:
         decision = self.decisions.get(job_id(result.job))
         if not decision:
             return ""
-        label = decision["status"].replace("_", " ")
+        label = status_label(decision["status"])
         details = [decision["note"]] if decision["note"] else []
-        if decision["status"] in ACTIVE_STATUSES and decision.get("applied_on"):
+        # Kept after an application ends (rejected, withdrawn, cancelled), so the history stays complete.
+        if decision.get("applied_on"):
             details.append(f"applied {decision['applied_on']}")
         return f"{label} ({'; '.join(details)})" if details else label
 
@@ -438,7 +451,7 @@ def decision_lines(decisions: dict[str, dict[str, str]], today: date, stale_days
     ``stale_days``), then everything else."""
     if not decisions:
         return []
-    counts = {status: 0 for status in ("applied", "interview", "offer", "rejected", "withdrawn",
+    counts = {status: 0 for status in ("applied", "interview", "offer", "rejected", "withdrawn", "cancelled",
                                        "watching", "not_interested")}
     for decision in decisions.values():
         counts[decision["status"]] += 1
@@ -469,5 +482,8 @@ def decision_lines(decisions: dict[str, dict[str, str]], today: date, stale_days
     if others:
         lines += ["", "Other decisions:"]
     for number, decision in others:
-        lines.append(label(number, decision) + (f"  {decision['note']}" if decision["note"] else ""))
+        extra = [f"applied {decision['applied_on']}"] if decision.get("applied_on") else []
+        if decision["note"]:
+            extra.append(decision["note"])
+        lines.append(label(number, decision) + (f"  {'; '.join(extra)}" if extra else ""))
     return lines

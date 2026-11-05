@@ -314,6 +314,40 @@ class DecideTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn("Active applications:", out)
 
+    def test_cancelled_status_keeps_the_application_and_hides_it(self):
+        for alias in ("cancelled", "Canceled", "cancel", "posting cancelled"):
+            self.assertEqual(normalize_status(alias), "cancelled")
+        save_decision(self.decisions, "812345600", "applied", today=date(2026, 10, 24))
+        code, out, err = self.cli("decide", "812345600", "cancelled", "agency", "cancelled", "11/4")
+        self.assertEqual(code, 0, err)
+        self.assertIn("as cancelled by agency (was applied)", out)
+        self.assertIn("hidden from the next run", out)
+        decision = load_decisions(self.decisions)[0]["812345600"]
+        self.assertEqual((decision["status"], decision["applied_on"], decision["note"]),
+                         ("cancelled", "2026-10-24", "agency cancelled 11/4"))
+        lines = decision_lines(load_decisions(self.decisions)[0], date(2026, 11, 5))
+        self.assertEqual(lines[0], "1 cancelled")
+        self.assertNotIn("Active applications:", lines)
+        self.assertIn("applied 2026-10-24; agency cancelled 11/4", lines[-1])
+
+    def test_titles_are_saved_and_listed_with_a_plain_ampersand(self):
+        (self.base / "reports" / "usajobs_job_history.json").write_text(json.dumps(
+            {"jobs": {"812345600": {"title": "Management &amp; Program Analyst", "agency": "Budget &amp;amp; Finance"},
+                      "812345700": {"title": "Budget &amp; Accounting Officer", "agency": ""}}}))
+        code, out, err = self.cli("decide", "812345600", "watching")
+        self.assertEqual(code, 0, err)
+        self.assertIn("(Management & Program Analyst, Budget & Finance)", out)
+        decision = load_decisions(self.decisions)[0]["812345600"]
+        self.assertEqual((decision["title"], decision["agency"]), ("Management & Program Analyst", "Budget & Finance"))
+        # Rows saved by hand or by an older version: decoded when read, and filled from history decoded.
+        with self.decisions.open("a", encoding="utf-8") as f:
+            f.write("812345800,not_interested,,Audit &amp; Review Lead,,,\n812345700,not_interested,,,,,\n")
+        decisions = load_decisions(self.decisions)[0]
+        self.assertEqual(decisions["812345800"]["title"], "Audit & Review Lead")
+        code, out, _ = self.cli("decide")
+        self.assertIn("Budget & Accounting Officer", out)
+        self.assertNotIn("&amp;", out)
+
     def test_list_fills_missing_titles_from_history(self):
         self.decisions.write_text("control_number,status,note\n812345600,not_interested,\n", encoding="utf-8")
         code, out, _ = self.cli("decide")
