@@ -498,8 +498,8 @@ def build_parser() -> argparse.ArgumentParser:
                            "arguments, list your applications with days waiting, then your other decisions.",
                  cmd_decide)
     decide.add_argument("control_number", nargs="?", help="the number in the job's USAJOBS link")
-    decide.add_argument("status", nargs="?", help="applied, interview, offer, rejected, withdrawn, cancelled, "
-                                                  "watching, not_interested, or clear to remove it")
+    from .tracking import STATUS_ORDER
+    decide.add_argument("status", nargs="?", help=", ".join(STATUS_ORDER) + ", or clear to remove it")
     decide.add_argument("note", nargs="*", help="optional note, e.g. \"referred, interview 11/3\"")
     decide.add_argument("--applied-on", metavar="YYYY-MM-DD",
                         help="the day you applied, for an application made before you started tracking it "
