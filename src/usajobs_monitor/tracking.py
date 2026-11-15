@@ -17,8 +17,10 @@ from .reasons import Code, code_of, is_hard_no
 from .review import VERIFY_ELIGIBILITY_FLAG, ReviewResult, needs_eligibility_check
 
 HISTORY_NAME = "usajobs_job_history.json"
-DECISION_STATUSES = {"applied", "interview", "offer", "rejected", "withdrawn", "cancelled", "not_interested",
-                     "watching"}
+# Every decision status, in the order ``decide`` counts and names them. Add a status here,
+# then give it aliases, and a place in HIDDEN_STATUSES or ACTIVE_STATUSES if it belongs there.
+STATUS_ORDER = ("applied", "interview", "offer", "rejected", "withdrawn", "cancelled", "watching", "not_interested")
+DECISION_STATUSES = set(STATUS_ORDER)
 # Postings with these statuses are hidden from later runs: you passed on them, or the application is over
 # (``cancelled`` is the agency cancelling the posting, ``withdrawn`` is you pulling out).
 HIDDEN_STATUSES = {"not_interested", "rejected", "withdrawn", "cancelled"}
@@ -114,7 +116,7 @@ def load_decisions(path: Path) -> tuple[dict[str, dict[str, str]], list[str]]:
     with path.open(newline="", encoding="utf-8-sig") as f:
         for line, row in enumerate(csv.DictReader(f), start=2):
             number = str(row.get("control_number") or "").strip()
-            status = re.sub(r"[\s-]+", "_", str(row.get("status") or "").strip().lower())
+            status = _status_key(str(row.get("status") or ""))
             if not number and not status:
                 continue
             if not number.isdigit() or status not in DECISION_STATUSES:
@@ -139,7 +141,7 @@ DECISION_ALIASES = {"not_interested": "not_interested", "not": "not_interested",
                     "cancelled": "cancelled", "canceled": "cancelled", "cancel": "cancelled",
                     "posting_cancelled": "cancelled", "posting_canceled": "cancelled",
                     "clear": "clear", "remove": "clear", "undo": "clear"}
-STATUS_HELP = "applied, interview, offer, rejected, withdrawn, cancelled, watching, not_interested or clear"
+STATUS_HELP = ", ".join(STATUS_ORDER) + " or clear"
 DECISION_COLUMNS = ["control_number", "status", "note", "title", "agency", "applied_on", "decided_on"]
 
 
@@ -148,9 +150,14 @@ def status_label(status: str) -> str:
     return STATUS_LABELS.get(status, status.replace("_", " "))
 
 
+def _status_key(value: str) -> str:
+    """A status as typed ("Not interested", "not-interested") in the form the lists above use."""
+    return re.sub(r"[\s-]+", "_", value.strip().lower())
+
+
 def normalize_status(value: str) -> str:
     """'not interested', 'not-interested' and 'NI' all mean not_interested; 'clear' removes a decision."""
-    key = re.sub(r"[\s-]+", "_", value.strip().lower())
+    key = _status_key(value)
     if key not in DECISION_ALIASES:
         raise ValueError(f"unknown status \"{value}\"; use {STATUS_HELP}")
     return DECISION_ALIASES[key]
@@ -451,8 +458,7 @@ def decision_lines(decisions: dict[str, dict[str, str]], today: date, stale_days
     ``stale_days``), then everything else."""
     if not decisions:
         return []
-    counts = {status: 0 for status in ("applied", "interview", "offer", "rejected", "withdrawn", "cancelled",
-                                       "watching", "not_interested")}
+    counts = {status: 0 for status in STATUS_ORDER}
     for decision in decisions.values():
         counts[decision["status"]] += 1
     lines = [", ".join(f"{count} {status.replace('_', ' ')}" for status, count in counts.items() if count)]

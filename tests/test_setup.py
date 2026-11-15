@@ -314,6 +314,16 @@ class DecideTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn("Active applications:", out)
 
+    def test_one_status_list_feeds_the_help_the_aliases_and_the_sets(self):
+        from usajobs_monitor import tracking
+        self.assertEqual(tracking.STATUS_HELP,
+                         "applied, interview, offer, rejected, withdrawn, cancelled, watching, not_interested or clear")
+        self.assertEqual(len(set(tracking.STATUS_ORDER)), len(tracking.STATUS_ORDER))
+        for status in tracking.STATUS_ORDER:
+            self.assertEqual(normalize_status(status), status)
+        self.assertEqual(set(tracking.DECISION_ALIASES.values()), set(tracking.STATUS_ORDER) | {"clear"})
+        self.assertLessEqual(tracking.HIDDEN_STATUSES | tracking.ACTIVE_STATUSES, set(tracking.STATUS_ORDER))
+
     def test_cancelled_status_keeps_the_application_and_hides_it(self):
         for alias in ("cancelled", "Canceled", "cancel", "posting cancelled"):
             self.assertEqual(normalize_status(alias), "cancelled")
