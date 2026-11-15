@@ -342,6 +342,22 @@ class WatchListTests(unittest.TestCase):
         self.assertEqual([r.job["PositionTitle"] for r in view.watch], ["watch"])
         self.assertEqual([r.job["PositionTitle"] for r in view.near], ["near"])
 
+    def test_each_posting_is_on_one_list(self):
+        match = result("match", [], number=1)
+        watch = result("watch", [SALARY], number=2)
+        near = result("near", [Reason(Code.SALARY, "posted upper salary $150,000 does not exceed $197,200")], number=3,
+                      low="13", high="13")
+        hidden = result("hidden", [], number=4)
+        excluded = result("excluded", [Reason(Code.NO_ROLE_SIGNAL, "no target role signal")], number=5)
+        everything = [match, watch, near, hidden, excluded]
+        decisions = {"4": {"status": "not_interested", "note": ""}}
+        view = tracking.build_view(everything, WATCH_CONFIG, None, decisions, date(2026, 10, 16), "run-1")
+        self.assertEqual([view.list_of(r) for r in everything], ["match", "watch", "near_miss", "hidden", "excluded"])
+        self.assertEqual([reports.list_status(r, view) for r in everything],
+                         ["Match", "Watch", "Near Miss", "Hidden", "Excluded"])
+        self.assertEqual([entry["list"] for entry in view.history["jobs"].values()],
+                         ["match", "watch", "near_miss", "hidden", "excluded"])
+
 
 class NearMissPayFloorTests(unittest.TestCase):
     def test_gs14_and_below_not_near_misses(self):
