@@ -324,16 +324,11 @@ def write_excel(path: Path, results: list[ReviewResult], config: dict[str, Any],
 
     now = now or datetime.now()
     wb = Workbook()
-    match_ids = {id(r) for r in view.matches}
-    watch_ids = {id(r) for r in view.watch}
-    hidden_ids = {id(r) for r in view.hidden}
 
     def status(r: ReviewResult) -> str:
-        if id(r) in hidden_ids:
-            return "Hidden"
-        if id(r) in match_ids:
-            return "Match"
-        return "Watch" if id(r) in watch_ids else "Excluded"
+        # Near misses have their own sheet; on the Tracker sheet they stay with the excluded postings.
+        label = list_status(r, view)
+        return "Excluded" if label == "Near Miss" else label
 
     order = {"Match": 0, "Watch": 1, "Excluded": 2, "Hidden": 3}
     tracker = sorted(results, key=lambda r: (order[status(r)], -r.score, str(r.job.get("PositionTitle", ""))))
@@ -421,13 +416,12 @@ def report_files(config: dict[str, Any]) -> list[str]:
     return [name for fmt, name in FORMAT_FILES.items() if fmt in formats]
 
 
+LIST_LABELS = {"match": "Match", "watch": "Watch", "near_miss": "Near Miss", "excluded": "Excluded", "hidden": "Hidden"}
+
+
 def list_status(result: ReviewResult, view: RunView) -> str:
     """Match, Watch, Near Miss, Excluded or Hidden: the list a posting landed on."""
-    for label, items in (("Hidden", view.hidden), ("Match", view.matches), ("Watch", view.watch),
-                         ("Near Miss", view.near)):
-        if any(r is result for r in items):
-            return label
-    return "Excluded"
+    return LIST_LABELS[view.list_of(result)]
 
 
 def _csv_cell(value: Any) -> Any:

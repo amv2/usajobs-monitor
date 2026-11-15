@@ -42,12 +42,8 @@ def _tiers(results: list[ReviewResult], settings: Settings) -> dict[int, str]:
     """``id(result) -> tier`` using the same lists a run reports."""
     decisions, _ = load_decisions(settings.decisions_path)
     view = build_view(results, settings.config, None, decisions, date.today(), "mcp")
-    tiers = {id(r): "excluded" for r in results}
-    for name, items in (("hidden", view.hidden), ("near_miss", view.near), ("watch_list", view.watch),
-                        ("match", view.matches)):
-        for r in items:
-            tiers[id(r)] = name
-    return tiers
+    # The tools have always called the watch list "watch_list"; runs call it "watch".
+    return {id(r): "watch_list" if (name := view.list_of(r)) == "watch" else name for r in results}
 
 
 def _decision(settings: Settings, number: str) -> dict[str, str] | None:
