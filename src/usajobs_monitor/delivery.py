@@ -545,8 +545,8 @@ CHANNEL_TYPES: dict[str, type[Channel]] = {
 
 
 def enabled_channels(config: Mapping[str, Any]) -> list[Channel]:
-    delivery = config.get("delivery") or {}
-    timeout = delivery.get("timeout_seconds", 30)
+    delivery = config["delivery"]
+    timeout = delivery["timeout_seconds"]
     return [CHANNEL_TYPES[name](delivery[name], timeout) for name in DELIVERY_CHANNELS
             if isinstance(delivery.get(name), dict) and delivery[name].get("enabled", True)]
 
@@ -628,15 +628,15 @@ def deliver(run_dir: Path, settings: Settings, *, env: Mapping[str, str] | None 
     """
     env = keychain.environment() if env is None else env
     config = settings.config
-    options = config.get("delivery") or {}
+    options = config["delivery"]
     channels = enabled_channels(config)
     if not channels and not dry_run:
         return {"status": "disabled", "message": "", "channels": {}}
     try:
         run = validated_run(run_dir)
         digest = build_digest(run.manifest, run.summary, run.finished,
-                              max_items=options.get("max_items", 5),
-                              near_misses=options.get("near_misses", "new"), preview=dry_run)
+                              max_items=options["max_items"],
+                              near_misses=options["near_misses"], preview=dry_run)
         if dry_run:
             folder = run.path / PREVIEW_DIR
             folder.mkdir(exist_ok=True)
@@ -651,14 +651,14 @@ def deliver(run_dir: Path, settings: Settings, *, env: Mapping[str, str] | None 
                     "files": [str(f) for f in files], "channels": {}}
         if run.manifest.get("preview_only") is True:
             raise DeliveryError("A snapshot created for preview cannot be delivered as a new run.")
-        if run.manifest["status"] == "error" and not options.get("notify_on_failure", True):
+        if run.manifest["status"] == "error" and not options["notify_on_failure"]:
             return {"status": "disabled", "message": "Failure notices are turned off.", "channels": {}}
         results: dict[str, dict] = {}
         with exclusive_lock(run.path / ".delivery.lock", "Another sender holds this run's delivery lock."):
             for channel in channels:
                 try:
                     results[channel.name] = _deliver_channel(channel, run, digest, env,
-                                                             options.get("max_attempts", 3))
+                                                             options["max_attempts"])
                 except DeliveryError as exc:
                     results[channel.name] = {"status": "failed", "message": str(exc)}
                 except (OSError, ValueError, TypeError):

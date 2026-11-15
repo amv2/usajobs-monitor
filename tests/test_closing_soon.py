@@ -14,7 +14,7 @@ FRIDAY = date(2026, 10, 16)
 
 
 def view(results, days=None, decisions=None):
-    config = {**WATCH_CONFIG, "report": {"closing_soon_days": days}} if days else WATCH_CONFIG
+    config = {**WATCH_CONFIG, "report": {**WATCH_CONFIG["report"], "closing_soon_days": days}} if days else WATCH_CONFIG
     return tracking.build_view(results, config, None, decisions or {}, FRIDAY, "run")
 
 

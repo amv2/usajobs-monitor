@@ -274,7 +274,7 @@ def appointment_type_reason(job: dict[str, Any], temporary_terms: list[str]) -> 
 def pay_plan_reason(job: dict[str, Any], filters: dict[str, Any]) -> Reason | None:
     """One reason for executive pay plans: built-in SES equivalents plus configured plans."""
     plans = {plan.upper() for plan in job_pay_plans(job)}
-    senior = SENIOR_EXECUTIVE_PAY_PLANS if filters.get("exclude_senior_executive", True) else set()
+    senior = SENIOR_EXECUTIVE_PAY_PLANS if filters["exclude_senior_executive"] else set()
     extra = {str(plan).strip().upper() for plan in filters.get("excluded_pay_plans", []) if str(plan).strip()}
     hits = sorted(plans & (senior | extra))
     if not hits:
@@ -338,7 +338,7 @@ def review_job(job: dict[str, Any], config: dict[str, Any]) -> ReviewResult:
     plan_reason = pay_plan_reason(job, filters)
     if plan_reason:
         reasons.append(plan_reason)
-    elif filters.get("exclude_senior_executive", True) and contains_any(
+    elif filters["exclude_senior_executive"] and contains_any(
             as_text(job.get("PositionTitle")), filters.get("senior_executive_terms", [])):
         # Title only: reporting-line boilerplate ("reports to the Deputy Director")
         # must not exclude ordinary analyst postings.

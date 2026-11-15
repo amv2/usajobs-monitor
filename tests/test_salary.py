@@ -6,6 +6,8 @@ from usajobs_monitor import review, tracking
 from usajobs_monitor.jobs import salary_display, salary_upper
 from usajobs_monitor.reasons import Code
 
+from support import validated
+
 
 def job(bands, plan="GS", low="14", high="14"):
     return {"PositionTitle": "Budget Analyst", "OrganizationName": "Smithsonian Institution",
@@ -15,10 +17,10 @@ def job(bands, plan="GS", low="14", high="14"):
 
 
 def config(floor, min_grade=None):
-    return {"search": {"target_role_keywords": ["budget"], "target_agencies": []},
-            "filters": {"salary_upper_must_exceed": floor, "min_gs_grade": min_grade, "current_agency_terms": [],
-                        "temporary_terms": [], "mismatch_terms": [], "senior_executive_terms": []},
-            "eligibility": {"service": "competitive", "has_competitive_status": True}}
+    return validated({"search": {"target_role_keywords": ["budget"], "target_agencies": []},
+                      "filters": {"salary_upper_must_exceed": floor, "min_gs_grade": min_grade, "current_agency_terms": [],
+                                  "temporary_terms": [], "mismatch_terms": [], "senior_executive_terms": []},
+                      "eligibility": {"service": "competitive", "has_competitive_status": True}})
 
 
 class SalaryUpperTests(unittest.TestCase):

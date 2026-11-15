@@ -370,7 +370,7 @@ def build_view(results: list[ReviewResult], config: dict[str, Any], history: dic
 
     previous = (history or {}).get("jobs", {})
     baseline = history is None
-    window = (config.get("report") or {}).get("closing_soon_days") or CLOSING_SOON_DAYS
+    window = config["report"]["closing_soon_days"]
     flags: dict[str, list[str]] = {}
     closing_days: dict[str, int] = {}
     for r in results:

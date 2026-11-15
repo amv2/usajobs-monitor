@@ -809,12 +809,8 @@ def load_settings(path: Path | str, env: Mapping[str, str] | None = None, *,
 
 
 def current_agency_terms(config: Mapping[str, Any]) -> list[str]:
-    """Profile terms, falling back to the pre-package ``filters`` location."""
-    terms = (config.get("profile") or {}).get("current_agency_terms")
-    if terms is None:
-        terms = (config.get("filters") or {}).get("current_agency_terms", [])
-    return list(terms or [])
+    return list(config["profile"]["current_agency_terms"])
 
 
 def scoring(config: Mapping[str, Any]) -> dict[str, float]:
-    return {**DEFAULT_SCORING, **{k: v for k, v in (config.get("scoring") or {}).items() if v is not None}}
+    return dict(config["scoring"])
