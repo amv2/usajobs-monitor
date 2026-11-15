@@ -29,12 +29,12 @@ PLACEHOLDER_VALUES = {"", "PUT_YOUR_USAJOBS_API_KEY_HERE", "PUT_YOUR_EMAIL_HERE"
 SERVICE_VALUES = ("competitive", "excepted", "none")
 
 DEFAULT_TEMPORARY_TERMS = [
-    "temporary promotion", "temporary appointment", "not-to-exceed", "not to exceed", " nte ",
+    "temporary promotion", "temporary appointment", "not-to-exceed", "not to exceed", "nte",
     "term appointment", "term-limited", "time-limited", "detail appointment", "detail opportunity",
     "detail assignment",
 ]
 DEFAULT_SENIOR_EXECUTIVE_TERMS = [
-    "senior executive service", " ses ", " sl ", " st ", "executive director", "deputy director",
+    "senior executive service", "ses", "sl", "st", "executive director", "deputy director",
     "senior authority",
 ]
 DEFAULT_SCORING = {
