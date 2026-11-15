@@ -276,6 +276,14 @@ class RunView:
     # Searches that failed after their retries; non-empty means an incomplete run.
     failed_searches: list[str] = field(default_factory=list)
 
+    def list_of(self, result: ReviewResult) -> str:
+        """The list a posting landed on: "hidden", "match", "watch" or "near_miss", else "excluded"."""
+        for name, items in (("hidden", self.hidden), ("match", self.matches), ("watch", self.watch),
+                            ("near_miss", self.near)):
+            if any(r is result for r in items):
+                return name
+        return "excluded"
+
     def fit_text(self, result: ReviewResult) -> str:
         number = job_id(result.job)
         label = FIT_LABELS.get(self.fits.get(number, ""), "")
