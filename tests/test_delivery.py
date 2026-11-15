@@ -23,6 +23,7 @@ MINIMAL = {"search": {"locations": ["Arlington, Virginia"], "target_role_keyword
 SECRET = "app-password-secret"
 DISCORD = "https://discord.com/api/webhooks/123/discord-token-secret"
 SLACK = "https://hooks.slack.com/services/T0/B0/slack-token-secret"
+OFFICE_REPORTS = (runner.WORD_NAME, runner.EXCEL_NAME)
 ENV = {"USAJOBS_SMTP_PASSWORD": SECRET, "USAJOBS_DISCORD_WEBHOOK_URL": DISCORD,
        "USAJOBS_SLACK_WEBHOOK_URL": SLACK, "USAJOBS_NTFY_TOPIC": "topic-secret"}
 
@@ -75,7 +76,7 @@ class DeliveryFixture(unittest.TestCase):
         }
         self.manifest = {"version": 1, "run_id": "test-run", "status": "ok",
                          "finished_at": self.summary["finished_at"], "attachments": []}
-        for name in runner.REPORT_NAMES:
+        for name in OFFICE_REPORTS:
             data = office_document(ATTACHMENT_TYPES[name][1])
             (self.run_dir / name).write_bytes(data)
             self.manifest["attachments"].append({"name": name, "sha256": hashlib.sha256(data).hexdigest()})
@@ -141,7 +142,7 @@ class EmailTests(DeliveryFixture):
         message = self.preview_message()
         parts = list(message.iter_attachments())
         self.assertEqual({part.get_content_type() for part in parts},
-                         {ATTACHMENT_TYPES[name][0] for name in runner.REPORT_NAMES})
+                         {ATTACHMENT_TYPES[name][0] for name in OFFICE_REPORTS})
         self.assertTrue(all("2026-10-02" in part.get_filename() for part in parts))
         body = message.get_body(preferencelist=("plain",)).get_content()
         for expected in ("270 jobs", "105 searches", "GS-14", "Eligibility:", "Oct 15, 2026",
@@ -247,7 +248,7 @@ class EmailTests(DeliveryFixture):
         self.assertEqual(self.deliver()["status"], "failed")
 
     def test_hash_mismatch_blocks_delivery(self):
-        (self.run_dir / runner.REPORT_NAMES[0]).write_bytes(office_document("word/document.xml") + b" ")
+        (self.run_dir / OFFICE_REPORTS[0]).write_bytes(office_document("word/document.xml") + b" ")
         self.assertEqual(self.deliver()["status"], "failed")
         self.smtp_ssl.assert_not_called()
 
@@ -558,7 +559,7 @@ class RunnerDeliveryTests(DeliveryFixture):
         body = json.loads(self.http.call_args.args[0].data)
         self.assertIn("run failed", body["content"])
         self.assertNotIn("secret detail", body["content"])
-        self.assertFalse((reports / runner.REPORT_NAMES[0]).exists())
+        self.assertFalse((reports / OFFICE_REPORTS[0]).exists())
 
 
 if __name__ == "__main__":

@@ -33,7 +33,6 @@ EXCEL_NAME = "usajobs_tracker.xlsx"
 HTML_NAME = "usajobs_digest.html"
 CSV_NAME = "usajobs_jobs.csv"
 SUMMARY_NAME = "usajobs_last_run.json"
-REPORT_NAMES = (WORD_NAME, EXCEL_NAME)  # what runs wrote before report.formats existed
 FORMAT_FILES = {"docx": WORD_NAME, "xlsx": EXCEL_NAME, "html": HTML_NAME, "csv": CSV_NAME}
 REPORT_LABELS = {WORD_NAME: "Word briefing", EXCEL_NAME: "Excel tracker", HTML_NAME: "HTML digest",
                  CSV_NAME: "CSV export"}

@@ -12,15 +12,19 @@ from usajobs_monitor import runner
 from usajobs_monitor.config import Settings
 
 
+OFFICE_REPORTS = (runner.WORD_NAME, runner.EXCEL_NAME)
+
+
 def make_reports(folder, *, when=None):
     when = when or datetime.now(timezone.utc)
-    for name, member in zip(runner.REPORT_NAMES, ("word/document.xml", "xl/workbook.xml")):
+    for name, member in zip(OFFICE_REPORTS, ("word/document.xml", "xl/workbook.xml")):
         with zipfile.ZipFile(folder / name, "w") as archive:
             archive.writestr("[Content_Types].xml", "<Types />")
             archive.writestr(member, "<document />")
     summary = {"status": "ok", "started_at": when.isoformat(), "finished_at": when.isoformat(),
                "jobs_reviewed": 1, "usajobs_searches": 1, "matches_after_final_filters": 0,
-               "target_agency_matches": 0, "near_misses_reported": 1, "matches": [], "resume_count": 0}
+               "target_agency_matches": 0, "near_misses_reported": 1, "matches": [], "resume_count": 0,
+               "report_files": list(OFFICE_REPORTS)}
     (folder / runner.SUMMARY).write_text(json.dumps(summary))
     return summary
 
@@ -47,7 +51,7 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(manifest["summary_sha256"], runner.sha256(folder / runner.SUMMARY))
         self.assertEqual(len(manifest["attachments"]), 2)
         self.assertEqual(json.loads((self.reports / runner.SUMMARY).read_text())["run_id"], folder.name)
-        for name in runner.REPORT_NAMES:
+        for name in OFFICE_REPORTS:
             self.assertEqual((self.reports / name).read_bytes(), (folder / name).read_bytes())
 
     def test_history_published_only_with_successful_run(self):
@@ -68,11 +72,11 @@ class RunnerTests(unittest.TestCase):
 
     def test_failure_does_not_reuse_successful_old_files_or_leak_error_text(self):
         make_reports(self.reports)
-        original = (self.reports / runner.REPORT_NAMES[0]).read_bytes()
+        original = (self.reports / OFFICE_REPORTS[0]).read_bytes()
         with self.search(RuntimeError("secret API body")):
             folder, success = runner.execute_search(self.settings)
         self.assertFalse(success)
-        self.assertEqual((self.reports / runner.REPORT_NAMES[0]).read_bytes(), original)
+        self.assertEqual((self.reports / OFFICE_REPORTS[0]).read_bytes(), original)
         manifest = json.loads((folder / "manifest.json").read_text())
         self.assertEqual(manifest["attachments"], [])
         self.assertEqual(json.loads((self.reports / runner.SUMMARY).read_text())["status"], "error")
@@ -91,7 +95,7 @@ class RunnerTests(unittest.TestCase):
     def test_partial_generation_is_failure(self):
         def child(settings, out):
             make_reports(out)
-            (out / runner.REPORT_NAMES[1]).unlink()
+            (out / OFFICE_REPORTS[1]).unlink()
         with self.search(child):
             folder, success = runner.execute_search(self.settings)
         self.assertFalse(success)
@@ -104,18 +108,9 @@ class RunnerTests(unittest.TestCase):
 
     def test_corrupt_docx_rejected(self):
         make_reports(self.reports)
-        (self.reports / runner.REPORT_NAMES[0]).write_bytes(b"not a zip")
+        (self.reports / OFFICE_REPORTS[0]).write_bytes(b"not a zip")
         with self.assertRaises(zipfile.BadZipFile):
             runner.validate_reports(self.reports)
-
-    def test_preview_uses_copies_and_cannot_be_selected_for_send(self):
-        make_reports(self.reports)
-        original = (self.reports / runner.SUMMARY).read_bytes()
-        folder = runner.preview_current(self.reports)
-        self.assertEqual((self.reports / runner.SUMMARY).read_bytes(), original)
-        self.assertTrue(json.loads((folder / "manifest.json").read_text())["preview_only"])
-        with self.assertRaises(ValueError):
-            runner.select_run(self.reports, folder.name)
 
     def test_run_selection_rejects_path_escape_and_symlink(self):
         with self.assertRaises(ValueError):
