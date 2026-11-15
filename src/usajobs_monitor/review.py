@@ -257,7 +257,7 @@ def appointment_type_reason(job: dict[str, Any], temporary_terms: list[str]) -> 
     """
     offerings = mapping_list(job.get("PositionOfferingType"))
     codes = {as_text(o.get("Code")).strip() for o in offerings}
-    title = f" {as_text(job.get('PositionTitle')).lower()} "
+    title = as_text(job.get("PositionTitle")).lower()
     if contains_any(title, temporary_terms) or re.search(r"\((?:temporary|term|nte|detail)\b", title):
         return Reason(Code.TEMPORARY, "temporary, term, NTE, or detail appointment (title)")
     if PERMANENT_OFFERING_CODE in codes:
@@ -265,8 +265,8 @@ def appointment_type_reason(job: dict[str, Any], temporary_terms: list[str]) -> 
     non_permanent = sorted(NON_PERMANENT_OFFERING_CODES[c] for c in codes if c in NON_PERMANENT_OFFERING_CODES)
     if non_permanent:
         return Reason(Code.TEMPORARY, f"temporary, term, NTE, or detail appointment ({', '.join(non_permanent)})")
-    label = f" {as_text([o.get('Name') for o in offerings]).lower()} "
-    if contains_any(label, temporary_terms + ["temporary", "term "]):
+    label = as_text([o.get("Name") for o in offerings])
+    if contains_any(label, temporary_terms + ["temporary", "term"]):
         return Reason(Code.TEMPORARY, "temporary, term, NTE, or detail appointment")
     return None
 
@@ -339,7 +339,7 @@ def review_job(job: dict[str, Any], config: dict[str, Any]) -> ReviewResult:
     if plan_reason:
         reasons.append(plan_reason)
     elif filters.get("exclude_senior_executive", True) and contains_any(
-            f" {as_text(job.get('PositionTitle')).lower()} ", filters.get("senior_executive_terms", [])):
+            as_text(job.get("PositionTitle")), filters.get("senior_executive_terms", [])):
         # Title only: reporting-line boilerplate ("reports to the Deputy Director")
         # must not exclude ordinary analyst postings.
         reasons.append(Reason(Code.SENIOR_EXEC_TITLE, "senior executive or director-level title"))
@@ -364,7 +364,7 @@ def review_job(job: dict[str, Any], config: dict[str, Any]) -> ReviewResult:
     if keyword_hits:
         parts.append((f"{keyword_hits} target keyword{'s' if keyword_hits != 1 else ''} in the announcement",
                       keyword_hits * weights["keyword"]))
-    title = f" {as_text(job.get('PositionTitle')).lower()} "
+    title = as_text(job.get("PositionTitle"))
     if contains_any(title, search.get("role_title_terms", [])):
         parts.append(("role title term in the title", weights["title"]))
     target_series = {str(code).strip() for code in search.get("target_job_series", [])}

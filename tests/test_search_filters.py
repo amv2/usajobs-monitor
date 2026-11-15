@@ -82,6 +82,17 @@ class WholeWordTermTests(unittest.TestCase):
             with self.subTest(text=text, term=term):
                 self.assertIs(review.contains_any(f" {text.lower()} ", [term]), expected)
 
+    def test_spaces_around_a_term_or_a_title_change_nothing(self):
+        # Terms were once matched as substrings and padded (" ses "); whole-word matching ignores the padding.
+        from usajobs_monitor.config import DEFAULT_SENIOR_EXECUTIVE_TERMS, DEFAULT_TEMPORARY_TERMS
+        titles = ["Processes Clerk", "SES Budget Director", "Budget Analyst, SL", "ST", "Stock Clerk", "Analyst NTE",
+                  "Internet Specialist", "Deputy Director", "Program Analyst (Term)", "Budget Analyst"]
+        for term in DEFAULT_SENIOR_EXECUTIVE_TERMS + DEFAULT_TEMPORARY_TERMS:
+            self.assertEqual(term, term.strip())
+            for title in titles:
+                with self.subTest(title=title, term=term):
+                    self.assertIs(review.contains_term(title, term), review.contains_term(f" {title} ", f" {term} "))
+
     def test_keywords_count_whole_words(self):
         self.assertEqual(review.keyword_score("Refinance the budgets; budgetary review", ["finance", "budget"]), 1)
 
