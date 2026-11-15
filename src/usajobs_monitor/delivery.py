@@ -196,7 +196,7 @@ class Run:
 
 
 def validated_run(run_dir: Path) -> Run:
-    """Check the manifest, summary hash and both reports before anything is sent."""
+    """Check the manifest, summary hash and every report before anything is sent."""
     run_dir = Path(run_dir).absolute()
     if run_dir.is_symlink() or not run_dir.is_dir() or run_dir != run_dir.resolve():
         raise DeliveryError("The run directory must be a real directory without symbolic links.")

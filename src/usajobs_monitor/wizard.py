@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
+from .config import DEFAULT_REPORT_TITLE
 from .presets import PRESETS
 from .series import COMMON_SERIES, find_series
 
@@ -46,7 +47,7 @@ class Answers:
     channels: list[str] = field(default_factory=list)
     email: dict[str, Any] = field(default_factory=dict)
     formats: list[str] = field(default_factory=lambda: ["html", "csv"])
-    title: str = "USAJOBS Job Monitor"
+    title: str = DEFAULT_REPORT_TITLE
 
 
 def _split(value: str, sep: str = ",") -> list[str]:

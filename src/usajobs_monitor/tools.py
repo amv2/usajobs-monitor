@@ -15,6 +15,7 @@ from .jobs import (
     agency_display,
     as_text,
     close_date,
+    details,
     grade_display,
     job_id,
     job_url,
@@ -139,7 +140,7 @@ def screen_eligibility(settings: Settings, control_number: str) -> dict[str, Any
     config = settings.config
     basis, reason = eligibility_screen(job, config)
     internal_other = not basis and is_internal_other_agency(job, current_agency_terms(config))
-    detail = (job.get("UserArea") or {}).get("Details") or {}
+    detail = details(job)
     if basis:
         verdict = "route_found"
     elif internal_other:

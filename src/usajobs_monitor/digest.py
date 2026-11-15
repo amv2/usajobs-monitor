@@ -88,8 +88,7 @@ def close_date(value: object) -> str:
     try:
         if not isinstance(value, str):
             raise ValueError
-        # USAJOBS can return four fractional-second digits, which older Python
-        # releases reject. The announcement's own calendar date needs no conversion.
+        # The announcement's own calendar date, as written: the time is dropped, not converted.
         day = datetime.fromisoformat(value.partition("T")[0])
         return f"{day:%b} {day.day}, {day.year}"
     except (TypeError, ValueError):
