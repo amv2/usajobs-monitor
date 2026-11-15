@@ -79,7 +79,7 @@ FIELD_CHARS = 6000
 FIT_LEVELS = ("strong", "possible", "stretch", "unlikely")
 REQUIREMENT_STATUSES = ("met", "unclear", "missing")
 # Models that take the server-side refusal fallback (``fallbacks: "default"``).
-FALLBACK_MODELS = {"claude-opus-5-5", "claude-opus-5", "claude-fable-5-1", "claude-sonnet-5-5"}
+FALLBACK_MODELS = {"claude-opus-5-5", "claude-opus-5", "claude-fable-5-2", "claude-fable-5-1", "claude-sonnet-5-5"}
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
 
 FIT_SCHEMA: dict[str, Any] = {

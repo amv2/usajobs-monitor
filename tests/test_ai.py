@@ -685,6 +685,17 @@ class ProviderTests(unittest.TestCase):
         self.assertEqual((kwargs["fallbacks"], kwargs["betas"]), ("default", [fit.FALLBACK_BETA]))
 
     @unittest.skipUnless(importlib.util.find_spec("anthropic"), "anthropic not installed")
+    def test_refusal_fallback_is_requested_for_the_models_that_take_it(self):
+        response = mock.Mock(stop_reason="end_turn", content=[mock.Mock(type="text", text=json.dumps(GOOD_ANSWER))])
+        for model, expected in (("claude-fable-5-2", True), ("claude-fable-5-1", True), ("claude-opus-5-5", True),
+                                ("claude-opus-5", True), ("claude-sonnet-5-5", True), ("claude-haiku-5-5", False)):
+            with self.subTest(model=model):
+                provider = fit.make_provider({**self.AI, "model": model}, env={"ANTHROPIC_API_KEY": "test-key"})
+                with mock.patch.object(provider.client.beta.messages, "create", return_value=response) as create:
+                    provider.complete("sys", "prompt")
+                self.assertEqual(create.call_args.kwargs.get("fallbacks"), "default" if expected else None)
+
+    @unittest.skipUnless(importlib.util.find_spec("anthropic"), "anthropic not installed")
     def test_anthropic_refusal_and_errors(self):
         import anthropic
         provider = fit.make_provider({**self.AI, "model": "claude-haiku-5-5"}, env={"ANTHROPIC_API_KEY": "k"})
