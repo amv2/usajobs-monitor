@@ -166,17 +166,6 @@ class OutputTests(unittest.TestCase):
         with self.assertRaises(delivery.DeliveryError):
             delivery.validated_run(folder)
 
-    def test_summary_from_before_formats_still_previews(self):
-        settings = self.settings(["docx", "xlsx"])
-        runner.execute_search(settings)
-        latest = settings.reports_dir / runner.SUMMARY
-        summary = json.loads(latest.read_text())
-        del summary["report_files"]
-        latest.write_text(json.dumps(summary))
-        preview = runner.preview_current(settings.reports_dir)
-        self.assertEqual([a["name"] for a in json.loads((preview / "manifest.json").read_text())["attachments"]],
-                         [WORD_NAME, EXCEL_NAME])
-
 
 if __name__ == "__main__":
     unittest.main()

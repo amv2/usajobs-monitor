@@ -12,7 +12,6 @@ import io
 import json
 import os
 import re
-import shutil
 import tempfile
 import zipfile
 import xml.etree.ElementTree as ET
@@ -31,7 +30,6 @@ from .reports import (
     EXCEL_NAME,
     FORMAT_FILES,
     HTML_NAME,
-    REPORT_NAMES,
     SUMMARY_NAME,
     WORD_NAME,
     report_files,
@@ -84,8 +82,8 @@ def run_lock(reports: Path) -> Iterator[None]:
         yield
 
 
-def new_run_dir(reports: Path, preview: bool = False) -> Path:
-    root = reports / ("previews" if preview else "runs")
+def new_run_dir(reports: Path) -> Path:
+    root = reports / "runs"
     root.mkdir(parents=True, exist_ok=True)
     run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "-" + uuid4().hex[:12]
     result = root / run_id
@@ -196,8 +194,8 @@ def _add_report_paths(summary: dict, folder: Path) -> None:
 
 
 def summary_report_files(summary: dict) -> list[str]:
-    """The reports a run wrote. Summaries from before report.formats list none: they had the Office pair."""
-    files = summary.get("report_files", list(REPORT_NAMES))
+    """The reports a run wrote."""
+    files = summary.get("report_files")
     if (not isinstance(files, list) or not files or len(set(files)) != len(files)
             or any(name not in FORMAT_FILES.values() for name in files)):
         raise ValueError("The run's report list is invalid.")
@@ -262,7 +260,7 @@ def validate_reports(run_dir: Path, started_at: datetime | None = None) -> dict:
     return summary
 
 
-def prepare_manifest(run_dir: Path, summary: dict, *, failure: bool = False, preview: bool = False) -> dict:
+def prepare_manifest(run_dir: Path, summary: dict, *, failure: bool = False) -> dict:
     summary["run_id"] = run_dir.name
     files = [] if failure else summary_report_files(summary)
     if not failure:
@@ -272,7 +270,7 @@ def prepare_manifest(run_dir: Path, summary: dict, *, failure: bool = False, pre
         "version": 1, "run_id": run_dir.name, "status": summary["status"],
         "finished_at": summary["finished_at"], "summary_sha256": sha256(run_dir / SUMMARY),
         "attachments": [{"name": n, "sha256": sha256(run_dir / n)} for n in files],
-        "failure_message": FAILURE_MESSAGE if failure else "", "preview_only": preview,
+        "failure_message": FAILURE_MESSAGE if failure else "", "preview_only": False,
     }
     write_json(run_dir / "manifest.json", manifest)
     return manifest
@@ -321,23 +319,6 @@ def execute_search(settings: Settings) -> tuple[Path, bool]:
         prepare_manifest(run_dir, summary, failure=True)
         write_json(reports / SUMMARY, summary)
         return run_dir, False
-
-
-def preview_current(reports: Path) -> Path:
-    # Copies only allowlisted outputs and cannot be selected by select_run.
-    latest = reports / SUMMARY
-    if latest.is_symlink():
-        raise ValueError("Preview source must be a regular file.")
-    files = summary_report_files(json.loads(latest.read_text()))
-    run_dir = new_run_dir(reports, preview=True)
-    for name in (*files, SUMMARY):
-        source = reports / name
-        if source.is_symlink():
-            raise ValueError("Preview source must be a regular file.")
-        shutil.copyfile(source, run_dir / name)
-    summary = validate_reports(run_dir)
-    prepare_manifest(run_dir, summary, preview=True)
-    return run_dir
 
 
 def select_run(reports: Path, run_id: str) -> Path:
