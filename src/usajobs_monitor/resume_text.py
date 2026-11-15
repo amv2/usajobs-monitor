@@ -72,13 +72,6 @@ def resume_names(paths: list[Path]) -> list[str]:
     return short if all(short) and len(set(short)) == len(short) else stems
 
 
-def read_resumes(paths: list[Path]) -> str:
-    """One resume as plain text, or several, each marked with its short name."""
-    if len(paths) == 1:
-        return read_resume(paths[0])
-    return wrap_versions(resume_names(paths), [read_resume(path) for path in paths])
-
-
 def wrap_versions(names: list[str], texts: list[str]) -> str:
     return "\n\n".join(f'<resume_version name="{name}">\n{text}\n</resume_version>'
                         for name, text in zip(names, texts))

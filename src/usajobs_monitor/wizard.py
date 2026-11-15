@@ -16,7 +16,6 @@ from .presets import PRESETS
 from .series import COMMON_SERIES, find_series
 
 API_KEY_URL = "https://developer.usajobs.gov/apirequest/"
-CHANNEL_CHOICES = ("email", "discord", "slack", "ntfy")
 CHANNEL_SECRETS = {
     "email": ["USAJOBS_SMTP_PASSWORD"],
     "discord": ["USAJOBS_DISCORD_WEBHOOK_URL"],

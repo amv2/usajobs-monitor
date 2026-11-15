@@ -37,7 +37,6 @@ HIRING_PATHS = {
     "ses": "Senior executives",
 }
 
-USAJOBS_PATHS_HELP = "https://help.usajobs.gov/working-in-government/unique-hiring-paths"
 USAJOBS_FED_HELP = "https://help.usajobs.gov/working-in-government/unique-hiring-paths/federal-employees"
 
 

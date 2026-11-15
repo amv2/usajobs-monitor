@@ -64,9 +64,6 @@ DELIVERY_SECRET_ENV = {
 }
 SMTP_SECURITY = {"ssl": 465, "starttls": 587}
 TARGET_MATCH_MODES = ("at_grade", "above_grade")
-# Pay floors a [target] fills in. A value set in [filters] always wins.
-TARGET_FILTER_KEYS = ("salary_upper_must_exceed", "near_miss_upper_salary_must_exceed",
-                      "near_miss_min_gs_grade", "min_gs_grade", "watch_list")
 ENV_NAME = r"[A-Za-z_][A-Za-z0-9_]{0,99}"
 # The optional AI add-on ([ai]); see fit.py. Nothing here is used unless asked for.
 # Ready-made setups for AI command-line tools people already have, so a profile names
