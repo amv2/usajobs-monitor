@@ -176,10 +176,10 @@ class ResumeTests(unittest.TestCase):
     def test_several_resumes_are_named_versions(self):
         (self.folder / "Budget Director.md").write_text("Directed budgets.")
         (self.folder / "Analyst.txt").write_text("Analyzed things.")
-        text = resume_text.read_resumes(resume_text.find_resumes(None, self.folder))
+        text = resume_choice.load_resume_set(None, self.folder, {}).combined
         self.assertIn('<resume_version name="Analyst">\nAnalyzed things.\n</resume_version>', text)
         self.assertIn('<resume_version name="Budget Director">', text)
-        single = resume_text.read_resumes([self.folder / "Analyst.txt"])
+        single = resume_choice.load_resume_set(self.folder / "Analyst.txt", None, {}).combined
         self.assertEqual(single, "Analyzed things.")
 
 
