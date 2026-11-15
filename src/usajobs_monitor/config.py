@@ -64,7 +64,6 @@ DELIVERY_SECRET_ENV = {
 }
 SMTP_SECURITY = {"ssl": 465, "starttls": 587}
 TARGET_MATCH_MODES = ("at_grade", "above_grade")
-ENV_NAME = r"[A-Za-z_][A-Za-z0-9_]{0,99}"
 # The optional AI add-on ([ai]); see fit.py. Nothing here is used unless asked for.
 # Ready-made setups for AI command-line tools people already have, so a profile names
 # the tool instead of spelling out its flags. Each runs with its file and shell tools
@@ -509,7 +508,7 @@ def _check_delivery(check: _Checker, config: dict[str, Any]) -> None:
         check.boolean(channel, "enabled", path, True)
         for env_key, default in DELIVERY_SECRET_ENV[name].items():
             check.string(channel, env_key, path, default)
-            if isinstance(channel.get(env_key), str) and not re.fullmatch(ENV_NAME, channel[env_key]):
+            if isinstance(channel.get(env_key), str) and not keychain.NAME_PATTERN.fullmatch(channel[env_key]):
                 check.error(f"{path}.{env_key}", "expected an environment variable name like USAJOBS_SMTP_PASSWORD")
         if name == "email":
             check.string(channel, "security", path, "ssl", choices=tuple(SMTP_SECURITY))
@@ -573,7 +572,7 @@ def _check_ai(check: _Checker, config: dict[str, Any]) -> None:
         check.string(ai, "response_format", path, "")
         check.string(ai, "effort", path, "medium", choices=AI_EFFORTS)
         check.string(ai, "api_key_env", path, DEFAULT_AI_KEY_ENV)
-    if isinstance(ai.get("api_key_env"), str) and ai["api_key_env"] and not re.fullmatch(ENV_NAME, ai["api_key_env"]):
+    if isinstance(ai.get("api_key_env"), str) and ai["api_key_env"] and not keychain.NAME_PATTERN.fullmatch(ai["api_key_env"]):
         check.error("ai.api_key_env", "expected an environment variable name like ANTHROPIC_API_KEY")
     check.strings(ai, "command", path, [])
     if provider == "command" and not ai.get("command"):
