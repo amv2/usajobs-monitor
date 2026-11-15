@@ -92,7 +92,7 @@ def active_filters_text(config: dict[str, Any], decisions_name: str) -> list[str
     lines.append(line)
 
     routes = ["open to the public"]
-    if config.get("profile", {}).get("current_agency_terms") or filters.get("current_agency_terms"):
+    if config["profile"]["current_agency_terms"]:
         routes.append("internal to your current agency")
     if eligibility.get("service") == "excepted":
         routes.append("excepted-service employees")
@@ -112,11 +112,11 @@ def active_filters_text(config: dict[str, Any], decisions_name: str) -> list[str
     lines.append("Appointment type: temporary, term, NTE, detail, and other non-permanent appointment types "
                  "(USAJOBS appointment-type code, or the job title) are excluded.")
 
-    plans = sorted(SENIOR_EXECUTIVE_PAY_PLANS) if filters.get("exclude_senior_executive", True) else []
+    plans = sorted(SENIOR_EXECUTIVE_PAY_PLANS) if filters["exclude_senior_executive"] else []
     plans += sorted({str(p).upper() for p in filters.get("excluded_pay_plans", [])} - set(plans))
     if plans:
         line = f"Pay plans excluded: {', '.join(plans)}."
-        if filters.get("exclude_senior_executive", True):
+        if filters["exclude_senior_executive"]:
             line += " Titles naming senior executive roles are also excluded."
         lines.append(line)
 
@@ -418,7 +418,7 @@ def summary_entry(result: ReviewResult, view: RunView, *, with_reasons: bool = F
 
 def report_files(config: dict[str, Any]) -> list[str]:
     """File names for ``report.formats``, in a fixed order."""
-    formats = (config.get("report") or {}).get("formats") or ["docx", "xlsx"]
+    formats = config["report"]["formats"]
     return [name for fmt, name in FORMAT_FILES.items() if fmt in formats]
 
 

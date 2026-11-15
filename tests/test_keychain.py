@@ -10,6 +10,8 @@ from unittest.mock import patch
 from usajobs_monitor import cli, delivery, keychain
 from usajobs_monitor.config import ConfigError, Settings, resolve_credentials
 
+from support import validated
+
 KEY = "k3y-value-that-must-not-leak"
 
 
@@ -105,9 +107,9 @@ class EnvironmentTests(unittest.TestCase):
 
     def test_delivery_secrets_come_from_the_keychain(self):
         hook = "https://hooks.slack.com/services/T000/B000/abc"
-        settings = Settings(config={"delivery": {"slack": {"webhook_url_env": "USAJOBS_SLACK_WEBHOOK_URL"}}},
-                            config_path=Path("x.toml"), reports_dir=Path("."), decisions_path=Path("d.csv"),
-                            resume_folder=None)
+        config = validated({"delivery": {"slack": {"webhook_url_env": "USAJOBS_SLACK_WEBHOOK_URL"}}})
+        settings = Settings(config=config, config_path=Path("x.toml"), reports_dir=Path("."),
+                            decisions_path=Path("d.csv"), resume_folder=None)
         ready = delivery.check_channels(settings.config, keychain.Environment(
             {}, FakeStore({"USAJOBS_SLACK_WEBHOOK_URL": hook})))
         self.assertEqual(ready, [("slack", "ready")])

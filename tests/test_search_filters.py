@@ -8,6 +8,8 @@ from usajobs_monitor import api, reports, review, tracking
 from usajobs_monitor.config import DEFAULT_SCORING as S
 from usajobs_monitor.reasons import Code, Reason
 
+from support import validated
+
 
 def page(ids, total):
     return {"SearchResult": {"SearchResultCountAll": total,
@@ -98,7 +100,7 @@ class WholeWordTermTests(unittest.TestCase):
 
 
 class SeniorExecutiveTests(unittest.TestCase):
-    config = {
+    config = validated({
         "search": {"target_role_keywords": ["budget analyst"], "target_agencies": []},
         "filters": {"salary_upper_must_exceed": 100, "current_agency_terms": ["ERC"],
                     "temporary_terms": [], "mismatch_terms": [],
@@ -106,7 +108,7 @@ class SeniorExecutiveTests(unittest.TestCase):
                                                "executive director", "deputy director", "senior authority"]},
         "eligibility": {"service": "excepted", "has_competitive_status": False,
                         "interchange_agency": "Example Regulatory Commission", "additional_hiring_paths": []},
-    }
+    })
 
     def job(self, title="Budget Analyst", pay_plan="GS", qualification=""):
         return {"PositionTitle": title, "OrganizationName": "Smithsonian Institution",
@@ -158,14 +160,14 @@ class SeniorExecutiveTests(unittest.TestCase):
 
 
 class RoleSignalTests(unittest.TestCase):
-    config = {
+    config = validated({
         "search": {"target_role_keywords": ["budget analyst"], "role_title_terms": ["accountant", "financial"],
                    "target_agencies": ["Commodity Futures Trading Commission"]},
         "filters": {"salary_upper_must_exceed": 100, "current_agency_terms": ["ERC"],
                     "temporary_terms": [], "mismatch_terms": [], "senior_executive_terms": []},
         "eligibility": {"service": "excepted", "has_competitive_status": False,
                         "interchange_agency": "Example Regulatory Commission", "additional_hiring_paths": []},
-    }
+    })
 
     def job(self, title):
         return {"PositionTitle": title, "OrganizationName": "Commodity Futures Trading Commission",
@@ -254,13 +256,13 @@ class NearMissOrderTests(unittest.TestCase):
 
 
 class ExcludedSeriesTests(unittest.TestCase):
-    config = {
-        "search": {"target_role_keywords": [], "role_title_terms": ["accountant", "budget"], "target_agencies": []},
+    config = validated({
+        "search": {"role_title_terms": ["accountant", "budget"], "target_agencies": []},
         "filters": {"salary_upper_must_exceed": 100, "current_agency_terms": ["ERC"], "temporary_terms": [],
                     "mismatch_terms": [], "senior_executive_terms": [], "excluded_job_series": ["0905", "0510", "0511"]},
         "eligibility": {"service": "excepted", "has_competitive_status": False,
                         "interchange_agency": "Example Regulatory Commission", "additional_hiring_paths": []},
-    }
+    })
 
     def review(self, title, *series):
         job = {"PositionTitle": title, "OrganizationName": "Agency", "JobCategory": [{"Code": c} for c in series],
@@ -328,7 +330,7 @@ def result(title, reasons, *, number, plan="GS", low="15", high="15", close="202
 
 
 SALARY = Reason(Code.SALARY, "posted upper salary $197,200 does not exceed $197,200")
-WATCH_CONFIG = {"filters": {"watch_list": {"pay_plans": ["GS", "GG"], "grades": ["15"]}}}
+WATCH_CONFIG = validated({"filters": {"watch_list": {"pay_plans": ["GS", "GG"], "grades": ["15"]}}})
 
 
 class WatchListTests(unittest.TestCase):
@@ -356,8 +358,8 @@ class WatchListTests(unittest.TestCase):
 
 class NearMissPayFloorTests(unittest.TestCase):
     def test_gs14_and_below_not_near_misses(self):
-        config = {"filters": {"watch_list": {"pay_plans": ["GS", "GG"], "grades": ["15"]},
-                              "near_miss_upper_salary_must_exceed": 187093, "near_miss_min_gs_grade": 15}}
+        config = validated({"filters": {"watch_list": {"pay_plans": ["GS", "GG"], "grades": ["15"]},
+                                        "near_miss_upper_salary_must_exceed": 187093, "near_miss_min_gs_grade": 15}})
         def near(title, upper, reason):
             code = Code.SALARY if reason.startswith("posted upper salary") else Code.NO_HIRING_ROUTE
             r = result(title, [Reason(code, reason)], number=abs(hash(title)) % 10**9, low="14", high="14")

@@ -41,6 +41,22 @@ class ValidationTests(unittest.TestCase):
         self.assertEqual(config["paths"]["reports_dir"], "reports")
         self.assertEqual(config["report"]["title"], "USAJOBS Job Monitor")
 
+    def test_defaults_the_code_reads_without_a_fallback(self):
+        # review, reports, tracking and delivery read these straight from the validated config.
+        config, _ = validate_config(MINIMAL)
+        self.assertEqual(config["profile"]["current_agency_terms"], [])
+        self.assertEqual((config["report"]["formats"], config["report"]["closing_soon_days"]), (["docx", "xlsx"], 3))
+        self.assertEqual({key: config["delivery"][key] for key in
+                          ("timeout_seconds", "max_items", "near_misses", "notify_on_failure", "max_attempts")},
+                         {"timeout_seconds": 30, "max_items": 5, "near_misses": "new", "notify_on_failure": True,
+                          "max_attempts": 3})
+        # A value left empty in the file gets the default too.
+        config, _ = validate_config({**MINIMAL, "scoring": {"title": None}, "report": {"closing_soon_days": None},
+                                     "filters": {"exclude_senior_executive": None}})
+        self.assertEqual(config["scoring"], DEFAULT_SCORING)
+        self.assertEqual(config["report"]["closing_soon_days"], 3)
+        self.assertTrue(config["filters"]["exclude_senior_executive"])
+
     def test_input_is_not_mutated(self):
         raw = json.loads(json.dumps(MINIMAL))
         validate_config(raw)

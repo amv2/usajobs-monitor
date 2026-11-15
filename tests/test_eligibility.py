@@ -5,6 +5,8 @@ import unittest
 from usajobs_monitor.reasons import Code
 from usajobs_monitor.review import eligibility_screen, is_internal_other_agency, review_job
 
+from support import validated
+
 
 class EligibilityTests(unittest.TestCase):
     terms = ["ERC", "Example Regulatory Commission"]
@@ -12,8 +14,8 @@ class EligibilityTests(unittest.TestCase):
                "interchange_agency": "Example Regulatory Commission", "additional_hiring_paths": []}
 
     def screen(self, job, **profile_changes):
-        return eligibility_screen(job, {"filters": {"current_agency_terms": self.terms},
-                                       "eligibility": {**self.profile, **profile_changes}})
+        return eligibility_screen(job, validated({"profile": {"current_agency_terms": self.terms},
+                                                 "eligibility": {**self.profile, **profile_changes}}))
 
     def job(self, paths=None, agency="Federal Deposit Insurance Corporation", **detail):
         if paths is not None:
@@ -35,12 +37,12 @@ class EligibilityTests(unittest.TestCase):
             HiringPathDisplay=["Competitive service", "Career transition (CTAP, ICTAP, RPL)"],
             RequiredDocuments="Competitive service SF-50; interagency career transition assistance.",
         )
-        config = {
+        config = validated({
             "eligibility": self.profile,
             "filters": {"salary_upper_must_exceed": 180000, "current_agency_terms": self.terms,
                         "temporary_terms": [], "senior_executive_terms": [], "mismatch_terms": []},
             "search": {"target_role_keywords": ["financial"], "target_agencies": ["Federal Deposit Insurance Corporation"]},
-        }
+        })
         result = review_job(job, config)
         self.assertTrue(result.kept)
         self.assertEqual(result.reasons, [])
@@ -131,10 +133,10 @@ class EligibilityTests(unittest.TestCase):
     def test_special_authority_match_is_flagged_for_verification(self):
         from datetime import date
         from usajobs_monitor.tracking import build_view
-        config = {"eligibility": self.profile,
-                  "filters": {"salary_upper_must_exceed": 180000, "current_agency_terms": self.terms,
-                              "temporary_terms": [], "senior_executive_terms": [], "mismatch_terms": []},
-                  "search": {"target_role_keywords": ["financial"], "target_agencies": []}}
+        config = validated({"eligibility": self.profile,
+                            "filters": {"salary_upper_must_exceed": 180000, "current_agency_terms": self.terms,
+                                        "temporary_terms": [], "senior_executive_terms": [], "mismatch_terms": []},
+                            "search": {"target_role_keywords": ["financial"], "target_agencies": []}})
         special = review_job({**self.job(["special-authorities"]), "PositionID": "1"}, config)
         public = review_job({**self.job(["public"]), "PositionID": "2"}, config)
         self.assertTrue(special.kept and public.kept)
@@ -167,18 +169,18 @@ class EligibilityTests(unittest.TestCase):
         self.assertIn("eligibility review required", self.screen(self.job(HiringPathDisplay=["Unknown label"]))[1])
 
     def test_agency_terms_read_from_profile_section(self):
-        config = {"profile": {"current_agency_terms": self.terms}, "eligibility": self.profile}
+        config = validated({"profile": {"current_agency_terms": self.terms}, "eligibility": self.profile})
         basis, reason = eligibility_screen(self.job(["fed-internal-search"], "ERC"), config)
         self.assertTrue(basis)
         self.assertIsNone(reason)
 
     def test_internal_other_agency_is_hard_no_code(self):
-        config = {
+        config = validated({
             "eligibility": self.profile,
             "filters": {"salary_upper_must_exceed": 0, "current_agency_terms": self.terms,
                         "temporary_terms": [], "senior_executive_terms": [], "mismatch_terms": []},
             "search": {"target_role_keywords": ["financial"], "target_agencies": []},
-        }
+        })
         result = review_job(self.job(["fed-internal-search"]), config)
         self.assertEqual([r.code for r in result.reasons], [Code.INTERNAL_OTHER_AGENCY])
 
