@@ -342,6 +342,8 @@ def validate_config(raw: Mapping[str, Any]) -> tuple[dict[str, Any], list[str]]:
     report = check.section(config, "report")
     check.unknown(report, "report", {"title", "formats", "closing_soon_days"})
     check.string(report, "title", "report", DEFAULT_REPORT_TITLE)
+    if isinstance(report.get("title"), str) and not report["title"].strip():
+        report["title"] = DEFAULT_REPORT_TITLE  # a blank title would leave the reports with no heading
     check.number(report, "closing_soon_days", "report", CLOSING_SOON_DAYS, integer=True)
     days = report.get("closing_soon_days")
     if isinstance(days, int) and not isinstance(days, bool) and not 1 <= days <= 14:
