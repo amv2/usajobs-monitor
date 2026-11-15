@@ -120,7 +120,7 @@ class SearchFailed(RuntimeError):
 
 def search_all_jobs(config: dict[str, Any], *, failures: list[str] | None = None
                     ) -> tuple[list[dict[str, Any]], int, list[str]]:
-    """Run every keyword in every location (plus remote if enabled); dedupe by position.
+    """Run every keyword in every location (plus remote if enabled); dedupe by control number.
 
     Without ``failures`` the first failed search raises. With it, a search that
     still fails after its retries is skipped and its label appended, so one bad
@@ -160,7 +160,9 @@ def search_all_jobs(config: dict[str, Any], *, failures: list[str] | None = None
             warnings.append(warning)
         for item in items:
             job = descriptor(item)
-            key = str(job.get("PositionID") or job.get("PositionURI") or job.get("PositionTitle"))
+            # The control number, as in history and decisions. An agency's announcement number
+            # (PositionID) is not unique across USAJOBS, so it can't tell two postings apart.
+            key = job_id(job) or str(job.get("PositionURI") or "")
             if key not in seen:
                 seen.add(key)
                 jobs.append(job)

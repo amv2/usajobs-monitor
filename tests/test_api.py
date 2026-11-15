@@ -134,5 +134,38 @@ class DisplayTextTests(unittest.TestCase):
         self.assertEqual(plain_text(None), "")
 
 
+class DedupeTests(unittest.TestCase):
+    CONFIG = {"credentials": {"email": "e", "api_key": "k"},
+              "search": {"target_role_keywords": ["a", "b"], "locations": ["Bethesda"]}}
+
+    @staticmethod
+    def page(*postings):
+        items = [{"MatchedObjectDescriptor": {"PositionID": announcement, "PositionTitle": "Budget Analyst",
+                                              **({"PositionURI": f"https://www.usajobs.gov/job/{control}"}
+                                                 if control else {})}}
+                 for announcement, control in postings]
+        return {"SearchResult": {"SearchResultCountAll": len(items), "SearchResultItems": items}}
+
+    def search(self, *pages):
+        with mock.patch.object(api, "fetch_usajobs", side_effect=list(pages)):
+            jobs, _, _ = api.search_all_jobs(self.CONFIG)
+        return [(job["PositionID"], job.get("PositionURI", "").rpartition("/")[2]) for job in jobs]
+
+    def test_a_posting_found_by_two_searches_is_kept_once(self):
+        self.assertEqual(self.search(self.page(("A-1", "800000001"), ("A-2", "800000002")),
+                                     self.page(("A-2", "800000002"), ("A-3", "800000003"))),
+                         [("A-1", "800000001"), ("A-2", "800000002"), ("A-3", "800000003")])
+
+    def test_two_postings_that_share_an_announcement_number_are_both_kept(self):
+        # Announcement numbers are the agency's own, so two agencies can use the same one.
+        self.assertEqual(self.search(self.page(("26-01", "800000001"), ("26-01", "800000002")),
+                                     self.page(("26-01", "800000002"))),
+                         [("26-01", "800000001"), ("26-01", "800000002")])
+
+    def test_without_a_link_the_announcement_number_still_tells_postings_apart(self):
+        self.assertEqual(self.search(self.page(("A-1", ""), ("A-2", "")), self.page(("A-2", ""), ("A-1", ""))),
+                         [("A-1", ""), ("A-2", "")])
+
+
 if __name__ == "__main__":
     unittest.main()
