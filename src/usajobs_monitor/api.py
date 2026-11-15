@@ -10,7 +10,7 @@ from urllib.parse import urlencode
 from urllib.request import Request
 
 from . import net
-from .jobs import plain_text
+from .jobs import job_id, plain_text
 
 USAJOBS_SEARCH_URL = "https://data.usajobs.gov/api/search"
 RESULTS_PER_PAGE = 500  # USAJOBS Search API maximum
@@ -189,5 +189,4 @@ def fetch_job(control_number: str, credentials: dict[str, str]) -> dict[str, Any
     payload = fetch_usajobs({"Keyword": number, "ResultsPerPage": RESULTS_PER_PAGE},
                             credentials["email"], credentials["api_key"])
     jobs = [descriptor(item) for item in api_items(payload)]
-    from .jobs import job_id
     return next((job for job in jobs if job_id(job) == number), None)

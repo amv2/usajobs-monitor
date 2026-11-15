@@ -371,12 +371,13 @@ def _credential_names(config_path: Path) -> list[tuple[str, bool]]:
     names = [(name, True) for name in CREDENTIAL_NAMES]
     if not config_path.is_file():
         return names
-    delivery = load_settings(config_path, require_credentials=False).config.get("delivery") or {}
+    config = load_settings(config_path, require_credentials=False).config
+    delivery = config.get("delivery") or {}
     for channel in DELIVERY_CHANNELS:
         settings = delivery.get(channel)
         if isinstance(settings, dict) and settings.get("enabled", True):
             names += [(settings[key], key != "token_env") for key in DELIVERY_SECRET_ENV[channel]]
-    ai = load_settings(config_path, require_credentials=False).config["ai"]
+    ai = config["ai"]
     if ai["provider"] in ("anthropic", "openai") and ai["api_key_env"] and (ai["fit_notes"] or ai["send_resume"]):
         names.append((ai["api_key_env"], False))
     return names
