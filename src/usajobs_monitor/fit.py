@@ -596,7 +596,7 @@ def run_fit_notes(settings: Any, view: Any, output_dir: Path, today: date,
         notes.sort(key=lambda note: FIT_RANK[note["fit"]])  # stable: best first, as in the reports
     (output_dir / FIT_CACHE_NAME).write_text(json.dumps({"version": 1, "entries": cache}, indent=2, sort_keys=True),
                                              encoding="utf-8")
-    title = settings.config.get("report", {}).get("title") or "USAJOBS"
+    title = settings.config["report"]["title"]
     (output_dir / FIT_NOTES_NAME).write_text(render_markdown(notes, failures, title, today), encoding="utf-8")
     status = "ok" if not failures else ("partial" if notes else "error")
     outcome: dict[str, Any] = {"status": status, "notes": len(notes), "from_cache": from_cache,

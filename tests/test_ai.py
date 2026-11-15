@@ -245,6 +245,17 @@ class FitNoteTests(unittest.TestCase):
         outcome = fit.run_fit_notes(settings, view, self.out, date(2026, 10, 19), again)
         self.assertEqual((outcome["notes"], outcome["from_cache"], again.calls), (2, 2, []))
 
+    def test_notes_carry_the_report_title(self):
+        for title, heading in (("Budget jobs", "# Resume fit notes: Budget jobs"),
+                               ("", "# Resume fit notes: USAJOBS Job Monitor")):
+            with self.subTest(title=title):
+                settings = load_settings(self.base / "p.toml", require_credentials=False, raw={
+                    **BASE, "report": {"title": title},
+                    "ai": {"fit_notes": True, "send_resume": True, "resume": "resume.md"}})
+                view = self.view(settings, [job("1")])
+                fit.run_fit_notes(settings, view, self.out, date(2026, 10, 17), FakeProvider())
+                self.assertEqual((self.out / fit.FIT_NOTES_NAME).read_text().splitlines()[0], heading)
+
     def test_a_changed_resume_misses_the_cache(self):
         self.assertNotEqual(fit.cache_key("1", "resume a", "fake"), fit.cache_key("1", "resume b", "fake"))
         self.assertNotEqual(fit.cache_key("1", "resume", "model a"), fit.cache_key("1", "resume", "model b"))

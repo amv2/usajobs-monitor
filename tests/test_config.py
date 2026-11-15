@@ -70,6 +70,14 @@ class ValidationTests(unittest.TestCase):
         self.assertIn("filtres: unknown setting, ignored", warnings)
         self.assertIn("search.radius: unknown setting, ignored", warnings)
 
+    def test_blank_report_title_uses_the_default(self):
+        for blank in ("", "   ", None):
+            with self.subTest(title=blank):
+                config, warnings = validate_config({**MINIMAL, "report": {"title": blank}})
+                self.assertEqual((config["report"]["title"], warnings), ("USAJOBS Job Monitor", []))
+        config, _ = validate_config({**MINIMAL, "report": {"title": " Budget jobs "}})
+        self.assertEqual(config["report"]["title"], " Budget jobs ")
+
     def test_old_json_layout_still_loads(self):
         raw = {
             "credentials": {"email": "PUT_YOUR_EMAIL_HERE", "api_key": "PUT_YOUR_USAJOBS_API_KEY_HERE"},
