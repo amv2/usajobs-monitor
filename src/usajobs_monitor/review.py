@@ -242,8 +242,7 @@ def eligibility_screen(job: dict[str, Any], config: dict[str, Any]) -> tuple[str
 def occupational_mismatch(job: dict[str, Any], terms: list[str], series: list[str]) -> bool:
     """Title words and job series only; announcement boilerplate ("ChatGPT or Copilot",
     "doctors to nurses", "a physician or other medical professional") is ignored."""
-    title = as_text(job.get("PositionTitle")).lower()
-    if any(re.search(rf"\b{re.escape(term.strip().lower())}s?\b", title) for term in terms if term.strip()):
+    if contains_any(as_text(job.get("PositionTitle")), terms):
         return True
     return bool(set(job_category_codes(job)) & {str(code).strip() for code in series})
 

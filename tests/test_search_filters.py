@@ -295,6 +295,16 @@ class MismatchTests(unittest.TestCase):
         self.assertTrue(review.occupational_mismatch(self.job("Registered Nurse - Transplant"), self.terms, []))
         self.assertTrue(review.occupational_mismatch(self.job("Law Enforcement Specialist (Instructor)"), self.terms, []))
         self.assertFalse(review.occupational_mismatch(self.job("Copilot Program Analyst"), self.terms, []))
+
+    def test_terms_match_like_every_other_term_list(self):
+        # The config reference promises a trailing * and loose spacing for the [filters] phrases.
+        cases = [("Nursing Assistant", "nurs*", True), ("Registered Nurse", "nurs*", True),
+                 ("Law Enforcement Officer", "law  enforcement", True), ("Law  Enforcement Officer", "law enforcement", True),
+                 ("Staff Nurses", "nurse", True), ("Nursery Worker", "nurse", False), ("Budget Analyst", "nurs*", False),
+                 ("Budget Analyst", " ", False), ("Budget Analyst", "*", False)]
+        for title, term, expected in cases:
+            with self.subTest(title=title, term=term):
+                self.assertIs(review.occupational_mismatch(self.job(title), [term], []), expected)
         self.assertTrue(review.occupational_mismatch(self.job("Senior Operational Medicine Advisor", series="0602"), self.terms, ["0602"]))
 
 
