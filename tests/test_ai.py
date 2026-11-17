@@ -579,6 +579,41 @@ class ProviderTests(unittest.TestCase):
             fit.CommandProvider(["/no/such/program"], 30).complete("s", "p")
         self.assertTrue(caught.exception.fatal)
 
+    def test_signed_out_cli_gets_a_fixed_fatal_message(self):
+        printed = "Failed to authenticate: OAuth session expired and could not be refreshed secret-detail"
+        script = "import sys; print(%r); sys.exit(1)" % printed
+        provider = fit.CommandProvider([sys.executable, "-c", script], 30, "claude-cli", "",
+                                       ("failed to authenticate", "not logged in"), "claude auth login")
+        with self.assertRaises(FitError) as caught:
+            provider.complete("s", "p")
+        self.assertTrue(caught.exception.fatal)
+        self.assertEqual(str(caught.exception), "ai.provider claude-cli is not signed in (or its sign-in expired); "
+                                                "run 'claude auth login' in a terminal on this computer")
+        self.assertNotIn("secret", str(caught.exception))
+        # On standard error too, in any case.
+        script = "import sys; sys.stderr.write('Not Logged In'); sys.exit(1)"
+        provider = fit.CommandProvider([sys.executable, "-c", script], 30, "claude-cli", "", ("not logged in",))
+        with self.assertRaises(FitError) as caught:
+            provider.complete("s", "p")
+        self.assertTrue(caught.exception.fatal)
+        self.assertIn("sign in to it again", str(caught.exception))
+        # Any other failure stays a plain, non-fatal exit status.
+        script = "import sys; print('rate limited'); sys.exit(1)"
+        provider = fit.CommandProvider([sys.executable, "-c", script], 30, "claude-cli", "", ("not logged in",))
+        with self.assertRaises(FitError) as caught:
+            provider.complete("s", "p")
+        self.assertFalse(caught.exception.fatal)
+        self.assertEqual(str(caught.exception), "ai.provider claude-cli exited with status 1")
+
+    def test_claude_cli_preset_knows_its_sign_in_messages(self):
+        provider = fit.make_provider({**self.AI, "provider": "claude-cli", "model": ""},
+                                     env={"USAJOBS_ALLOW_AI_PROVIDER": "claude-cli"})
+        self.assertIn("failed to authenticate", provider.signed_out)
+        self.assertEqual(provider.login, "claude auth login")
+        provider = fit.make_provider({**self.AI, "provider": "codex-cli", "model": ""},
+                                     env={"USAJOBS_ALLOW_AI_PROVIDER": "codex-cli"})
+        self.assertEqual(provider.signed_out, ())
+
     def test_custom_provider_factory(self):
         module = type(sys)("fake_llm")
         module.make = lambda ai, env: FakeProvider()

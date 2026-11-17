@@ -290,6 +290,7 @@ Allow the whole command line, exactly: `export USAJOBS_ALLOW_AI_PROVIDER='my-mod
 |---|---|
 | `ai.provider would run claude ... set USAJOBS_ALLOW_AI_PROVIDER=claude-cli` | Set that variable where the run happens (your shell, or `~/.usajobs_env` for schedules). |
 | `the claude program was not found` | Install the CLI, or add its folder to `PATH` in `~/.usajobs_env`. |
+| `ai.provider claude-cli is not signed in (or its sign-in expired)` | Run `claude auth login` in a terminal on the computer that runs the schedule, then `claude auth status` should say `"loggedIn": true`. The run stops asking after the first posting, so no other notes are written until you sign in. |
 | `ai.provider claude-cli exited with status 1` | Run `claude` once in a terminal to check you're signed in and within your usage limits. Same for `codex` and `gemini`. |
 | `the AI provider did not answer with a JSON object` | The model didn't follow the format. With Ollama, try a larger model. |
 | `api.openai.com rejected the API key` (or another server's name) | Check the key with `usajobs-monitor credentials status`, and that `api_key_env` names the right variable. |

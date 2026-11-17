@@ -69,11 +69,15 @@ TARGET_MATCH_MODES = ("at_grade", "above_grade")
 # the tool instead of spelling out its flags. Each runs with its file and shell tools
 # off, because postings are untrusted text. ``ai.model``, when set, is added with the
 # tool's model flag (``ollama`` needs one: it is the model to run). claude's --safe-mode
-# also leaves out your CLAUDE.md, memory, plugins and MCP servers.
+# also leaves out your CLAUDE.md, memory, plugins and MCP servers. ``signed_out`` (text
+# the tool prints when its sign-in is missing or expired) and ``login`` are optional.
 AI_PRESETS: dict[str, dict[str, Any]] = {
     "claude-cli": {"program": "claude", "model_flag": "--model",
                    "args": ["-p", "--safe-mode", "--tools", "", "--strict-mcp-config", "--disable-slash-commands",
-                            "--no-session-persistence"]},
+                            "--no-session-persistence"],
+                   # What claude prints when it can't sign in, and the command that fixes it.
+                   "signed_out": ("failed to authenticate", "not logged in", "run /login"),
+                   "login": "claude auth login"},
     "codex-cli": {"program": "codex", "model_flag": "--model",
                   "args": ["exec", "--sandbox", "read-only", "--skip-git-repo-check", "-"]},
     "gemini-cli": {"program": "gemini", "model_flag": "--model",
