@@ -44,7 +44,7 @@ import urllib.error
 import urllib.request
 from datetime import date, timedelta
 from pathlib import Path
-from typing import Any, Mapping, Protocol
+from typing import Any, Mapping, Protocol, Sequence
 
 from .jobs import (
     as_text,
@@ -334,12 +334,15 @@ class OpenAIProvider:
 class CommandProvider:
     """A local program: the prompt on standard input, the answer on standard output."""
 
-    def __init__(self, command: list[str], timeout: float, label: str = "", missing: str = "") -> None:
+    def __init__(self, command: list[str], timeout: float, label: str = "", missing: str = "",
+                 signed_out: Sequence[str] = (), login: str = "") -> None:
         self.command = list(command)
         self.timeout = timeout
         self.label = label or f"command {Path(self.command[0]).name}"
         self.missing = missing or f"ai.command: {self.command[0]} was not found"
         self.name = "ai.command" if not label else f"ai.provider {label.split()[0]}"
+        self.signed_out = tuple(text.lower() for text in signed_out)
+        self.login = login
 
     def complete(self, system: str, prompt: str) -> str:
         text = f"{system}\n\n{schema_instructions()}\n\n{prompt}"
@@ -351,6 +354,11 @@ class CommandProvider:
         except subprocess.TimeoutExpired:
             raise FitError(f"{self.name} took longer than {self.timeout:g} seconds") from None
         if done.returncode != 0:
+            # Only a fixed message: the output itself is never passed on.
+            said = f"{done.stdout}\n{done.stderr}".lower()
+            if any(text in said for text in self.signed_out):
+                fix = f"run '{self.login}' in a terminal on this computer" if self.login else "sign in to it again"
+                raise FitError(f"{self.name} is not signed in (or its sign-in expired); {fix}", fatal=True)
             raise FitError(f"{self.name} exited with status {done.returncode}")
         return done.stdout
 
@@ -384,7 +392,8 @@ def make_provider(ai: Mapping[str, Any], env: Mapping[str, str] | None = None) -
         program = AI_PRESETS[name]["program"]
         missing = (f"ai.provider {name}: the {program} program was not found. Install it, or if it is installed, "
                    "add its folder to PATH where this runs (schedulers often leave out folders like ~/.local/bin)")
-        return CommandProvider(ai_preset_command(ai), timeout, " ".join(filter(None, [name, ai["model"]])), missing)
+        return CommandProvider(ai_preset_command(ai), timeout, " ".join(filter(None, [name, ai["model"]])), missing,
+                               AI_PRESETS[name].get("signed_out", ()), AI_PRESETS[name].get("login", ""))
     module_name, _, attr = name.partition(":")
     try:
         factory = getattr(importlib.import_module(module_name), attr)
