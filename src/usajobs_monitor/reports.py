@@ -26,7 +26,8 @@ from .config import DEFAULT_REPORT_TITLE, target_label
 from .presets import preset_labels
 from .reasons import code_of
 from .review import SENIOR_EXECUTIVE_PAY_PLANS, ReviewResult, applicant_label, target_agency_hit
-from .tracking import FIT_LABELS, RunView, baseline_text, incomplete_text, near_miss_reason_text, watch_list_label
+from .tracking import (FIT_LABELS, STALE_DAYS, RunView, application_text, baseline_text, incomplete_text,
+                       near_miss_reason_text, status_label, watch_list_label)
 
 WORD_NAME = "usajobs_briefing.docx"
 EXCEL_NAME = "usajobs_tracker.xlsx"
@@ -188,6 +189,21 @@ def add_job_paragraph(doc: Any, result: ReviewResult, view: RunView, *, reason: 
         p.add_run(f"\nEligibility basis: {result.eligibility_basis}")
 
 
+APPLICATIONS_NOTE = "Applications in progress from your decisions file, longest wait first."
+
+
+def add_application_paragraph(doc: Any, app: dict[str, Any]) -> None:
+    flags, facts = application_text(app)
+    p = doc.add_paragraph()
+    p.add_run(app["title"]).bold = True
+    if flags:
+        p.add_run(f"  [{', '.join(flags)}]").bold = True
+    p.add_run("\n" + " · ".join(facts))
+    if app["note"]:
+        p.add_run(f"\nYour note: {app['note']}")
+    p.add_run(f"\nUSAJOBS: {app['url']} (control number {app['control_number']})")
+
+
 def write_word(path: Path, results: list[ReviewResult], config: dict[str, Any], resumes: list[Path], calls: int,
                view: RunView, decisions_name: str, now: datetime | None = None) -> None:
     from docx import Document
@@ -267,6 +283,12 @@ def write_word(path: Path, results: list[ReviewResult], config: dict[str, Any], 
             label = {"match": "match", "watch": "watch list", "near_miss": "near miss"}.get(entry["list"], entry["list"])
             doc.add_paragraph(f"{entry['title']} ({entry['agency']}): was a {label}; {entry['reason']}. {entry['url']}")
 
+    if view.active_applications():
+        doc.add_heading("Your Applications", level=1)
+        doc.add_paragraph(APPLICATIONS_NOTE)
+        for app in view.active_applications():
+            add_application_paragraph(doc, app)
+
     doc.add_heading("Active Filters", level=1)
     doc.add_paragraph("\n".join(active_filters_text(config, decisions_name)))
 
@@ -318,6 +340,18 @@ def add_sheet(wb: Any, title: str, color: str, rows: list[list[Any]], headers: l
     ws.auto_filter.ref = ws.dimensions
 
 
+APPLICATION_HEADERS = ["Status", "Title", "Agency", "Applied On", "Days Since Applied", "Last Update",
+                       "Days Since Update", f"No Update In {STALE_DAYS} Days", "In This Run", "Note", "USAJOBS URL",
+                       "Control Number"]
+APPLICATION_WIDTHS = [20, 38, 32, 14, 12, 14, 12, 14, 16, 40, 48, 16]
+
+
+def application_row(app: dict[str, Any]) -> list[Any]:
+    return [status_label(app["status"]), app["title"], app["agency"], app["applied_on"], app["days_since_applied"],
+            app["last_update"], app["days_since_update"], "Yes" if app["stale"] else "",
+            LIST_LABELS.get(app["list"], "Not in results"), app["note"], app["url"], app["control_number"]]
+
+
 def write_excel(path: Path, results: list[ReviewResult], config: dict[str, Any], resumes: list[Path], calls: int,
                 view: RunView, decisions_path: Path, now: datetime | None = None) -> None:
     from openpyxl import Workbook
@@ -339,6 +373,10 @@ def write_excel(path: Path, results: list[ReviewResult], config: dict[str, Any],
               [[e["title"], e["agency"], e["list"], e["close_date"], e["reason"], e["url"], e["control_number"]] for e in view.dropped],
               headers=["Title", "Agency", "Was On", "Close Date", "Reason", "USAJOBS URL", "Control Number"],
               widths=[38, 32, 14, 16, 18, 48, 16])
+    if view.applications:
+        # Every application, in progress and ended, so the tracker keeps the whole record.
+        add_sheet(wb, "Applications", "2E7D32", [application_row(app) for app in view.applications],
+                  headers=APPLICATION_HEADERS, widths=APPLICATION_WIDTHS)
 
     summary = wb.create_sheet("Summary")
     summary_rows = [
@@ -354,6 +392,7 @@ def write_excel(path: Path, results: list[ReviewResult], config: dict[str, Any],
         ("Dropped since last run", len(view.dropped)),
         *([("Incomplete run", incomplete_text(view.failed_searches))] if view.failed_searches else []),
         ("Hidden by your decisions", len(view.hidden)),
+        *([("Applications in progress", len(view.active_applications()))] if view.applications else []),
         ("Resumes", resume_note(resumes, len(view.fits))),
         ("Salary rule", f"Upper salary must exceed {_money(config['filters'].get('salary_upper_must_exceed'))}"),
         *([("Pay target", target_label(config))] if target_label(config) else []),
@@ -504,6 +543,19 @@ def _html_job(result: ReviewResult, view: RunView, reason: str = "") -> str:
     return "".join(parts)
 
 
+def _html_application(app: dict[str, Any]) -> str:
+    esc = html.escape
+    flags, facts = application_text(app)
+    badges = "".join(f'<span style="{HTML_STYLE["flag"]}">{esc(flag)}</span>' for flag in flags)
+    parts = [f'<div style="{HTML_STYLE["card"]}"><p style="{HTML_STYLE["title"]}">{esc(app["title"])}{badges}</p>',
+             f'<p style="{HTML_STYLE["fact"]}">{esc(" · ".join(facts))}</p>']
+    if app["note"]:
+        parts.append(f'<p style="{HTML_STYLE["fact"]}"><b>Your note:</b> {esc(app["note"])}</p>')
+    link = f'<a style="{HTML_STYLE["link"]}" href="{esc(app["url"], quote=True)}">View on USAJOBS</a>'
+    parts.append(f'<p style="{HTML_STYLE["fact"]}">{link} · control number {esc(app["control_number"])}</p></div>')
+    return "".join(parts)
+
+
 def write_html(path: Path, results: list[ReviewResult], config: dict[str, Any], calls: int, view: RunView,
                decisions_name: str, now: datetime | None = None) -> None:
     """A self-contained HTML digest of the whole run, readable in any browser or mail client."""
@@ -545,6 +597,8 @@ def write_html(path: Path, results: list[ReviewResult], config: dict[str, Any], 
         section("Dropped since last run", "", [
             f'<p style="{HTML_STYLE["fact"]}">{esc(e["title"])} ({esc(e["agency"])}): {esc(e["reason"])}</p>'
             for e in view.dropped], "")
+    if view.active_applications():
+        section("Your applications", APPLICATIONS_NOTE, [_html_application(a) for a in view.active_applications()], "")
     body.append(f'<h2 style="{HTML_STYLE["h2"]}">Active filters</h2>')
     body.extend(f'<p style="{HTML_STYLE["fact"]}">{esc(line)}</p>' for line in active_filters_text(config, decisions_name))
     body.append("</div>")

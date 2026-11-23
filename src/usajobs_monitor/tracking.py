@@ -6,9 +6,9 @@ import csv
 import json
 import re
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 from .config import CLOSING_SOON_DAYS
 from .jobs import (GS_SCALE_PAY_PLANS, close_date, grade_numbers, job_id, job_pay_plans, job_url, plain_text,
@@ -26,8 +26,11 @@ DECISION_STATUSES = set(STATUS_ORDER)
 HIDDEN_STATUSES = {"not_interested", "rejected", "withdrawn", "cancelled"}
 # How a status reads in reports and ``decide`` messages, where it isn't just the status with spaces.
 STATUS_LABELS = {"not_interested": "not interested", "cancelled": "cancelled by agency"}
-# Applications still in progress: flagged on every run and listed by ``decide`` with days waiting.
+# Applications still in progress: flagged on every run, listed under "Your applications" in the
+# digest and reports, and listed by ``decide`` with days waiting.
 ACTIVE_STATUSES = {"applied", "interview", "offer"}
+# Applications that are over. They stay in the Excel tracker's Applications sheet.
+ENDED_STATUSES = {"rejected", "withdrawn", "cancelled"}
 STALE_DAYS = 30
 HISTORY_KEEP_DAYS = 45
 NEAR_MISS_LIMIT = 15
@@ -89,7 +92,7 @@ def is_watch_candidate(result: ReviewResult, config: dict[str, Any]) -> bool:
     return bool(numbers) and any(min(numbers) <= grade <= max(numbers) for grade in grades)
 
 
-def _iso_date(value: Any) -> str:
+def iso_date(value: Any) -> str:
     """A ``YYYY-MM-DD`` date from a hand-edited cell, or "" when it isn't one."""
     text = str(value or "").strip().partition("T")[0]
     try:
@@ -101,9 +104,9 @@ def _iso_date(value: Any) -> str:
 def _applied_on(row: dict[str, Any]) -> str:
     """The date you applied. Files written before ``applied_on`` existed only have
     ``decided_on``, which for a row still marked applied is the day you applied."""
-    applied = _iso_date(row.get("applied_on"))
+    applied = iso_date(row.get("applied_on"))
     if not applied and str(row.get("status") or "").strip().lower() == "applied":
-        applied = _iso_date(row.get("decided_on"))
+        applied = iso_date(row.get("decided_on"))
     return applied
 
 
@@ -126,7 +129,7 @@ def load_decisions(path: Path) -> tuple[dict[str, dict[str, str]], list[str]]:
             decisions[number] = {"status": status, "note": str(row.get("note") or "").strip(),
                                  "title": plain_text(row.get("title")).strip(),
                                  "agency": plain_text(row.get("agency")).strip(),
-                                 "applied_on": _applied_on(row), "decided_on": _iso_date(row.get("decided_on"))}
+                                 "applied_on": _applied_on(row), "decided_on": iso_date(row.get("decided_on"))}
     return decisions, warnings
 
 
@@ -282,6 +285,8 @@ class RunView:
     closing_soon_days: int = CLOSING_SOON_DAYS
     # Searches that failed after their retries; non-empty means an incomplete run.
     failed_searches: list[str] = field(default_factory=list)
+    # Your applications (see ``applications``), empty when report.applications is off.
+    applications: list[dict[str, Any]] = field(default_factory=list)
 
     def list_of(self, result: ReviewResult) -> str:
         """The list a posting landed on: "hidden", "match", "watch" or "near_miss", else "excluded"."""
@@ -347,6 +352,10 @@ class RunView:
 
     def closing_soon_count(self) -> int:
         return len(self.closing_soon())
+
+    def active_applications(self) -> list[dict[str, Any]]:
+        """Applications in progress, longest wait first."""
+        return [app for app in self.applications if app["active"]]
 
 
 def build_view(results: list[ReviewResult], config: dict[str, Any], history: dict[str, Any] | None,
@@ -439,9 +448,11 @@ def build_view(results: list[ReviewResult], config: dict[str, Any], history: dic
             "url": job_url(r.job),
         }
     new_history = {"version": 1, "run_marker": run_marker, "updated": today.isoformat(), "jobs": jobs}
+    in_run = {number: jobs[number]["list"] for number in current_ids}
+    apps = applications(decisions, today, jobs, in_run) if config["report"]["applications"] else []
     return RunView(matches, watch, near, hidden, dropped, flags, decisions, baseline, new_history,
                    closing_days=closing_days, closing_soon_days=window,
-                   failed_searches=list(failed_searches or []))
+                   failed_searches=list(failed_searches or []), applications=apps)
 
 
 def closes_in_text(days: int, closes: date) -> str:
@@ -454,10 +465,91 @@ def closes_in_text(days: int, closes: date) -> str:
 
 
 def _days_since(value: str, today: date) -> int | None:
+    """Days from ``value`` to ``today``, or None when it isn't a date or is in the future (a typo)."""
     try:
-        return (today - date.fromisoformat(value)).days
+        days = (today - date.fromisoformat(value)).days
     except ValueError:
         return None
+    return days if days >= 0 else None
+
+
+def applications(decisions: dict[str, dict[str, str]], today: date, jobs: Mapping[str, Any] | None = None,
+                 in_run: Mapping[str, str] | None = None, stale_days: int = STALE_DAYS) -> list[dict[str, Any]]:
+    """Every decision that is an application: those in progress first, longest wait first
+    (unknown application dates last), then ended ones, latest change first.
+
+    Your decisions file is the only source: USAJOBS doesn't share application status, and a
+    posting leaves the search results when it closes. ``jobs`` (run history) fills in a title
+    or agency the file doesn't have, and ``in_run`` names the list each posting is on in this
+    run. ``stale`` marks an application in progress with no update in ``stale_days``."""
+    jobs = jobs or {}
+    in_run = in_run or {}
+    found = []
+    for number, decision in decisions.items():
+        status = decision["status"]
+        if status not in ACTIVE_STATUSES | ENDED_STATUSES:
+            continue
+        seen = jobs.get(number) or {}
+        applied_on = decision.get("applied_on") or ""
+        last_update = decision.get("decided_on") or ""
+        updated = _days_since(last_update, today)
+        found.append({
+            "control_number": number,
+            "status": status,
+            "active": status in ACTIVE_STATUSES,
+            "title": decision.get("title") or plain_text(seen.get("title")).strip() or f"Control number {number}",
+            "agency": decision.get("agency") or plain_text(seen.get("agency")).strip(),
+            "applied_on": applied_on,
+            "days_since_applied": _days_since(applied_on, today),
+            "last_update": last_update,
+            "days_since_update": updated,
+            "stale": status in ACTIVE_STATUSES and updated is not None and updated >= stale_days,
+            "note": decision.get("note") or "",
+            "list": in_run.get(number, ""),
+            "url": f"https://www.usajobs.gov/job/{number}",
+        })
+    active = sorted((a for a in found if a["active"]), key=lambda a: (a["applied_on"] or "9999", a["control_number"]))
+    ended = sorted((a for a in found if not a["active"]), key=lambda a: (a["last_update"], a["control_number"]),
+                   reverse=True)
+    return active + ended
+
+
+STILL_LISTED = {"match": "still listed as a match", "watch": "still on the watch list",
+                "near_miss": "still listed as a near miss"}
+
+
+def _short_date(value: str, days: int | None) -> str:
+    """"Nov 13", with the year when it isn't this year's (or the day count is unknown)."""
+    day = date.fromisoformat(value)
+    if days is not None and (day + timedelta(days=days)).year == day.year:
+        return f"{day:%b} {day.day}"
+    return f"{day:%b} {day.day}, {day.year}"
+
+
+def _ago(days: int) -> str:
+    return "today" if days == 0 else "1 day ago" if days == 1 else f"{days} days ago"
+
+
+def application_text(app: Mapping[str, Any]) -> tuple[list[str], list[str]]:
+    """``(flags, facts)`` for one application in the digest and reports, for example
+    ``(["APPLIED", "NO UPDATE IN 34 DAYS"], ["Agency", "applied Oct 20 (34 days ago)", "still listed as a match"])``.
+    The note is left to the caller: chat messages leave it out."""
+    days = app.get("days_since_applied")
+    updated = app.get("days_since_update")
+    flags = [str(app.get("status") or "").upper()]
+    if app.get("stale") and updated is not None:
+        flags.append(f"NO UPDATE IN {updated} DAYS")
+    facts = [app["agency"]] if app.get("agency") else []
+    if app.get("applied_on"):
+        when = _short_date(app["applied_on"], days)
+        facts.append(f"applied {when} ({_ago(days)})" if days is not None else f"applied {when}")
+    else:
+        facts.append("applied date unknown (record it with decide --applied-on)")
+    if app.get("last_update") and app["last_update"] != app.get("applied_on") and updated is not None:
+        facts.append(f"last update {_short_date(app['last_update'], updated)} ({_ago(updated)})")
+    if app.get("list") in STILL_LISTED:
+        facts.append(STILL_LISTED[app["list"]])
+    return [flag for flag in flags if flag], facts
 
 
 def decision_lines(decisions: dict[str, dict[str, str]], today: date, stale_days: int = STALE_DAYS) -> list[str]:
@@ -475,19 +567,22 @@ def decision_lines(decisions: dict[str, dict[str, str]], today: date, stale_days
         what = ", ".join(part for part in (decision.get("title", ""), decision.get("agency", "")) if part)
         return f"{number:<12} {decision['status']:<15}" + (what or "(no title saved)")
 
-    active = [(n, d) for n, d in decisions.items() if d["status"] in ACTIVE_STATUSES]
     # Longest wait first; unknown application dates last.
-    active.sort(key=lambda item: (item[1].get("applied_on") or "9999", item[0]))
+    active = [app for app in applications(decisions, today, stale_days=stale_days) if app["active"]]
     if active:
         lines += ["", "Active applications:"]
-    for number, decision in active:
-        applied = _days_since(decision.get("applied_on", ""), today)
-        updated = _days_since(decision.get("decided_on", ""), today)
-        facts = [f"applied {decision['applied_on']} ({applied} days ago)" if applied is not None
-                 else "applied date unknown (record it with --applied-on)"]
-        if updated is not None and decision.get("decided_on") != decision.get("applied_on"):
-            facts.append(f"last update {decision['decided_on']} ({updated} days ago)")
-        if updated is not None and updated >= stale_days:
+    for app in active:
+        number, decision = app["control_number"], decisions[app["control_number"]]
+        applied, updated = app["days_since_applied"], app["days_since_update"]
+        if applied is not None:
+            facts = [f"applied {app['applied_on']} ({applied} days ago)"]
+        elif app["applied_on"]:
+            facts = [f"applied {app['applied_on']}"]  # a date in the future
+        else:
+            facts = ["applied date unknown (record it with --applied-on)"]
+        if updated is not None and app["last_update"] != app["applied_on"]:
+            facts.append(f"last update {app['last_update']} ({updated} days ago)")
+        if app["stale"]:
             facts.append(f"NO UPDATE IN {updated} DAYS")
         if decision["note"]:
             facts.append(decision["note"])

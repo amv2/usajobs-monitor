@@ -163,6 +163,7 @@ def run_search(settings: Settings, output_dir: Path, *, today: date | None = Non
         "closing_soon": view.closing_soon_count(),
         "closing_soon_days": view.closing_soon_days,
         "closing_soon_jobs": closing_soon_entries(view),
+        "applications_in_progress": view.active_applications(),
         "dropped_since_last_run": view.dropped,
         "hidden_not_interested": len(view.hidden),
         "matches": [summary_entry(r, view) for r in view.matches],
