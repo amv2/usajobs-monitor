@@ -594,6 +594,7 @@ Good habits:
 | 11 | A `cancelled` status for postings the agency cancels after you apply (hidden like `withdrawn`, applied date kept), and titles with `&` saved and shown correctly | Done (v0.4.1) |
 | 12 | `mismatch_terms` accept `*` and ignore spacing like the other term lists, search results are de-duplicated by control number, a blank report title uses the default, and an internal clean-up that removes unused code without changing any report | Done (v0.4.2) |
 | 13 | The `claude-cli` provider says when the Claude Code CLI is signed out (or its sign-in expired), names `claude auth login`, and stops after the first posting instead of trying each one | Done (v0.4.3) |
+| 14 | Every run lists your applications in progress (date applied, days waiting, last update, a 30-day no-update mark) in delivered messages and the HTML and Word reports, even after a posting closes, with an Applications sheet in the Excel tracker (`report.applications`) | Done (v0.4.4) |
 
 Phases 1 to 6 shipped in v0.1.0. Ideas and suggestions are welcome as issues.
 
