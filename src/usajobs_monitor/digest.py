@@ -20,7 +20,8 @@ from urllib.parse import urlsplit, urlunsplit
 
 from .config import CLOSING_SOON_DAYS
 from .reports import CSV_NAME, EXCEL_NAME, HTML_NAME, HTML_STYLE, REPORT_LABELS, WORD_NAME
-from .tracking import baseline_text, closes_in_text, incomplete_text
+from .tracking import (ACTIVE_STATUSES, STALE_DAYS, STILL_LISTED, application_text, baseline_text, closes_in_text,
+                       incomplete_text, iso_date)
 
 # File name -> (MIME type, the ZIP member an Office file must contain, or "").
 ATTACHMENT_TYPES = {
@@ -179,6 +180,34 @@ def _closing_item(entry: dict, watch_label: str) -> Item:
     return Item(title, [" · ".join(facts)], job_url(entry.get("url")))
 
 
+APPLICATIONS_LIMIT = 25
+APPLICATIONS_HEADING = "Your applications"
+
+
+def _days(value: object) -> int | None:
+    return value if type(value) is int and value >= 0 else None
+
+
+def _application_item(entry: dict) -> Item:
+    """One application in progress: status and how long it has waited, then your note (email only)."""
+    status = entry.get("status")
+    flags, facts = application_text({
+        "status": status if status in ACTIVE_STATUSES else "",
+        "agency": text(entry.get("agency"), ""),
+        "applied_on": iso_date(entry.get("applied_on")),
+        "days_since_applied": _days(entry.get("days_since_applied")),
+        "last_update": iso_date(entry.get("last_update")),
+        "days_since_update": _days(entry.get("days_since_update")),
+        "stale": entry.get("stale") is True,
+        "list": entry.get("list") if entry.get("list") in STILL_LISTED else "",
+    })
+    title = text(entry.get("title")) + (f" [{', '.join(flags)}]" if flags else "")
+    details = [" · ".join(facts)]
+    if text(entry.get("note"), ""):
+        details.append(f"Your note: {text(entry.get('note'))}")
+    return Item(title, details, job_url(entry.get("url")))
+
+
 def _excluded_section(heading: str, entries: list[dict]) -> Section:
     """A watch list or near-miss section. A reason every listed job shares is said once, above the jobs."""
     shared = frozenset.intersection(*(frozenset(_reasons(e)) for e in entries)) if len(entries) > 1 else frozenset()
@@ -237,6 +266,11 @@ def build_digest(manifest: dict, summary: dict, finished: datetime, *, max_items
                 f"{count(summary.get('closing_soon'))}. "
                 f"Dropped since last run: {len(dropped) if isinstance(dropped, list) else 0}."
             )
+        applications = _entries(summary, "applications_in_progress")
+        if applications:
+            stale = sum(e.get("stale") is True for e in applications)
+            paragraphs.append(f"Applications in progress: {len(applications)}"
+                              + (f" ({stale} with no update in {STALE_DAYS} days or more)" if stale else "") + ".")
         if matches == 0:
             paragraphs.append("No jobs met the final filters in this run.")
         else:
@@ -276,6 +310,12 @@ def build_digest(manifest: dict, summary: dict, finished: datetime, *, max_items
         if dropped:
             sections.append(Section("Dropped since last run", lines=[
                 f"{text(d.get('title'))} ({text(d.get('agency'))}): {text(d.get('reason'))}" for d in dropped[:10]]))
+        # Last, so new jobs and deadlines lead; the count line above always shows.
+        if applications:
+            section = Section(APPLICATIONS_HEADING, [_application_item(e) for e in applications[:APPLICATIONS_LIMIT]])
+            if len(applications) > APPLICATIONS_LIMIT:
+                section.lines.append(f"{len(applications) - APPLICATIONS_LIMIT} more in the reports.")
+            sections.append(section)
     if preview:
         subject = f"PREVIEW — {subject}"
         paragraphs.insert(0, "Local preview only. This message has not been sent.")
@@ -373,7 +413,8 @@ def chat_text(digest: Digest, *, limit: int, link: str = "{url}", bold: str = "{
             continue
         entries = [escape(section.intro)] if section.intro else []
         for item in items:
-            facts = [d for d in item.details if not d.startswith(("Promotion", "Your status"))]
+            # Your notes stay out of chat, which may be a shared channel.
+            facts = [d for d in item.details if not d.startswith(("Promotion", "Your status", "Your note"))]
             line = f"• {escape(item.title)} — " + "; ".join(escape(f) for f in facts)
             if item.url:
                 line += "\n  " + link.format(url=item.url)
