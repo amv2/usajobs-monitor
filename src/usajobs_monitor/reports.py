@@ -22,7 +22,7 @@ from .jobs import (
     promotion_potential_display,
     salary_display,
 )
-from .config import DEFAULT_REPORT_TITLE, target_label
+from .config import target_label
 from .presets import preset_labels
 from .reasons import code_of
 from .review import SENIOR_EXECUTIVE_PAY_PLANS, ReviewResult, applicant_label, target_agency_hit
@@ -206,7 +206,7 @@ def write_word(path: Path, results: list[ReviewResult], config: dict[str, Any], 
     doc.styles["Normal"].font.name = "Aptos"
     doc.styles["Normal"].font.size = Pt(10)
 
-    title = doc.add_heading(config.get("report", {}).get("title") or DEFAULT_REPORT_TITLE, level=0)
+    title = doc.add_heading(config["report"]["title"], level=0)
     title.alignment = WD_ALIGN_PARAGRAPH.CENTER
     subtitle = doc.add_paragraph(format_timestamp(now))
     subtitle.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -342,7 +342,7 @@ def write_excel(path: Path, results: list[ReviewResult], config: dict[str, Any],
 
     summary = wb.create_sheet("Summary")
     summary_rows = [
-        ("Report", config.get("report", {}).get("title") or DEFAULT_REPORT_TITLE),
+        ("Report", config["report"]["title"]),
         ("Refreshed", now.isoformat(timespec="seconds")),
         ("Jobs reviewed", len(results)),
         ("USAJOBS API searches run", calls),
@@ -509,7 +509,7 @@ def write_html(path: Path, results: list[ReviewResult], config: dict[str, Any], 
     """A self-contained HTML digest of the whole run, readable in any browser or mail client."""
     now = now or datetime.now()
     esc = html.escape
-    title = config.get("report", {}).get("title") or DEFAULT_REPORT_TITLE
+    title = config["report"]["title"]
     watch_label = watch_list_label(config)
     stats = [("Matches", len(view.matches)), (watch_label, len(view.watch)), ("Near misses", len(view.near)),
              ("Closing soon", view.closing_soon_count()), ("Jobs reviewed", len(results)), ("Searches", calls)]

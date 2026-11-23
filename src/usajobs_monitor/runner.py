@@ -140,7 +140,7 @@ def run_search(settings: Settings, output_dir: Path, *, today: date | None = Non
         "status": "ok",
         "started_at": started_at.isoformat(timespec="seconds"),
         "finished_at": datetime.now().astimezone().isoformat(timespec="seconds"),
-        "report_title": config.get("report", {}).get("title", ""),
+        "report_title": config["report"]["title"],
         "jobs_reviewed": len(results),
         "usajobs_searches": calls,
         "matches_after_final_filters": len(view.matches),
